@@ -49,7 +49,7 @@
   --shadow: 0 20px 50px -12px rgba(15, 23, 42, 0.25);
   --shadow-hover: 0 25px 60px -12px rgba(15, 23, 42, 0.35);
   display: grid;
-  grid-template-columns: 300px minmax(0, 1fr);
+  grid-template-columns: 270px minmax(0, 1fr);
   min-height: 100vh;
   background:
     radial-gradient(ellipse at top left, #e0f2fe 0%, transparent 50%),
@@ -65,8 +65,8 @@
   height: 100vh;
   display: flex;
   flex-direction: column;
-  gap: 32px;
-  padding: 28px 24px;
+  gap: 28px;
+  padding: 16px 12px;
   border-right: 1px solid var(--line);
   background:
     linear-gradient(180deg, #ffffff 0%, #f1f5f9 50%, #e2e8f0 100%);

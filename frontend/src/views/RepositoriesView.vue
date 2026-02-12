@@ -1,8 +1,14 @@
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, ref, watch } from "vue";
 import { mockRepos, type Repository } from "../mocks/repos";
+import { useRouter } from "vue-router";
 
 const search = ref("");
+const router = useRouter();
+
+function goToRepo(id: number) {
+  router.push({name: "repo-details", params: {id}})
+}
 
 const filteredRepos = computed(() => {
   const q = search.value.trim().toLowerCase();
@@ -11,6 +17,46 @@ const filteredRepos = computed(() => {
     r.fullName.toLowerCase().includes(q)
   );
 });
+
+const pageSize = 8;
+const currentPage = ref(1);
+
+const totalPages = computed(() =>
+  Math.max(1, Math.ceil(filteredRepos.value.length / pageSize))
+);
+
+const paginatedRepos = computed(() => {
+  const start = (currentPage.value - 1) * pageSize;
+  return filteredRepos.value.slice(start, start + pageSize);
+});
+
+const pageStart = computed(() => {
+  if (filteredRepos.value.length === 0) return 0;
+  return (currentPage.value - 1) * pageSize + 1;
+});
+
+const pageEnd = computed(() =>
+  Math.min(currentPage.value * pageSize, filteredRepos.value.length)
+);
+
+const pageNumbers = computed(() =>
+  Array.from({ length: totalPages.value }, (_, i) => i + 1)
+);
+
+watch(search, () => {
+  currentPage.value = 1;
+});
+
+watch(filteredRepos, () => {
+  if (currentPage.value > totalPages.value) {
+    currentPage.value = totalPages.value;
+  }
+});
+
+function goToPage(page: number) {
+  if (page < 1 || page > totalPages.value) return;
+  currentPage.value = page;
+}
 
 const resultsLabel = computed(() => {
   const count = filteredRepos.value.length;
@@ -90,7 +136,7 @@ function reviewStatus(lastReviewAt: string | null) {
         </thead>
 
         <tbody>
-          <tr v-for="repo in filteredRepos" :key="repo.id">
+          <tr v-for="repo in paginatedRepos" :key="repo.id" @click="goToRepo(repo.id)" class="row">
             <td data-label="Provider">
               <span class="chip provider-chip" :class="providerClass(repo.provider)">
                 {{ providerLabel(repo.provider) }}
@@ -127,6 +173,43 @@ function reviewStatus(lastReviewAt: string | null) {
         </tbody>
       </table>
     </div>
+
+    <footer v-if="filteredRepos.length > 0" class="pagination">
+      <p class="page-summary">
+        Showing {{ pageStart }}-{{ pageEnd }} of {{ filteredRepos.length }}
+      </p>
+
+      <div class="page-controls">
+        <button
+          type="button"
+          class="page-btn"
+          :disabled="currentPage === 1"
+          @click="goToPage(currentPage - 1)"
+        >
+          Prev
+        </button>
+
+        <button
+          v-for="page in pageNumbers"
+          :key="page"
+          type="button"
+          class="page-btn"
+          :class="{ active: page === currentPage }"
+          @click="goToPage(page)"
+        >
+          {{ page }}
+        </button>
+
+        <button
+          type="button"
+          class="page-btn"
+          :disabled="currentPage === totalPages"
+          @click="goToPage(currentPage + 1)"
+        >
+          Next
+        </button>
+      </div>
+    </footer>
   </section>
 </template>
 
@@ -413,6 +496,66 @@ tbody tr:last-child td {
   color: #718197;
 }
 
+.row {
+  cursor: pointer;
+}
+
+.row:hover {
+  background: #fafafa;
+}
+
+.pagination {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 4px 0;
+}
+
+.page-summary {
+  margin: 0;
+  color: var(--ink-soft);
+  font-size: 0.88rem;
+}
+
+.page-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.page-btn {
+  min-width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  border: 1px solid var(--line-strong);
+  background: #fff;
+  color: #2f4f6a;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0 10px;
+  transition: border-color 160ms ease, background-color 160ms ease, color 160ms ease;
+}
+
+.page-btn:hover:not(:disabled) {
+  border-color: #9fd6ed;
+  background: #f2fbff;
+  color: #155c7f;
+}
+
+.page-btn.active {
+  background: var(--accent-soft);
+  border-color: #9fd6ed;
+  color: #145f82;
+}
+
+.page-btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.5;
+}
+
 @media (max-width: 1024px) {
   .page-head {
     flex-direction: column;
@@ -513,6 +656,15 @@ tbody tr:last-child td {
 @media (max-width: 520px) {
   .title {
     font-size: 1.5rem;
+  }
+
+  .pagination {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .page-controls {
+    width: 100%;
   }
 
   tbody tr td,
