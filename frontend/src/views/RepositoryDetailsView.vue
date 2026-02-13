@@ -3,6 +3,7 @@ import { computed } from "vue";
 import { useRoute, RouterLink } from "vue-router";
 import { mockRepos } from "../mocks/repos";
 import { mockPRs } from "@/mocks/prs";
+import { router } from "@/router";
 
 const route = useRoute();
 const repoId = Number(route.params.id);
@@ -37,6 +38,10 @@ function prStatusClass(status: "open" | "merged" | "closed") {
     if (status === "open") return "is-open";
     if (status === "merged") return "is-merged";
     return "is-closed";
+}
+
+function goToPr(id: number) {
+    router.push({name: 'pr-details', params: {id}})
 }
 </script>
 
@@ -93,7 +98,7 @@ function prStatusClass(status: "open" | "merged" | "closed") {
                             </tr>
                         </thead>
                         <tbody>
-                            <tr v-for="pr in prs" :key="pr.id">
+                            <tr v-for="pr in prs" :key="pr.id" @click="goToPr(pr.id)" class="row">
                                 <td data-label="#" class="mono pr-number">#{{ pr.number }}</td>
                                 <td data-label="Title" class="pr-title">{{ pr.title }}</td>
                                 <td data-label="Status">
@@ -166,6 +171,14 @@ function prStatusClass(status: "open" | "merged" | "closed") {
 
 .back-link.inline {
     margin-top: 4px;
+}
+
+.row {
+  cursor: pointer;
+}
+
+.row:hover {
+  background: #fafafa;
 }
 
 .panel {
