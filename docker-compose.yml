@@ -7,9 +7,13 @@ services:
       APP_ENV: dev
       DATABASE_URL: "postgresql://app:!ChangeMe!@database:5432/app?serverVersion=16&charset=utf8"
       MAILER_DSN: "smtp://mailer:1025"
+      GITHUB_APP_ID: "2860467"
+      GITHUB_WEBHOOK_SECRET: "symfony-ai-pr-reviewer-bot-12345"
+      GITHUB_PRIVATE_KEY_PATH: "/app/var/github-app.pem"
     volumes:
       - ./api:/app
       - api_vendor:/app/vendor
+      - ./api/secrets/symfony-ai-pr-reviewer-bot.2026-02-13.private-key.pem:/app/var/github-app.pem:ro
     depends_on:
       database:
         condition: service_healthy
