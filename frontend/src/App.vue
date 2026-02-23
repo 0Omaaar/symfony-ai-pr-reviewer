@@ -1,3 +1,58 @@
+<script setup lang="ts">
+import { onMounted, ref } from "vue";
+
+type MeResponse = {
+  id?: number | string;
+  email?: string;
+  username?: string;
+  login?: string;
+  name?: string;
+  [key: string]: unknown;
+};
+
+const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+const me = ref<MeResponse | null>(null);
+const meStatus = ref("Not checked");
+const meError = ref("");
+const meRaw = ref("");
+
+function loginWithGithub() {
+  window.location.href = `${apiBaseUrl}/connect/github`;
+}
+
+async function fetchCurrentUser() {
+  meError.value = "";
+  meStatus.value = "Loading /api/me...";
+
+  try {
+    const response = await fetch(`${apiBaseUrl}/api/me`, {
+      credentials: "include",
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      me.value = null;
+      meRaw.value = text;
+      meStatus.value = `Unauthenticated (${response.status})`;
+      return;
+    }
+
+    const data = (await response.json()) as MeResponse;
+    me.value = data;
+    meRaw.value = JSON.stringify(data, null, 2);
+    meStatus.value = "Authenticated";
+  } catch (error) {
+    me.value = null;
+    meStatus.value = "Request failed";
+    meError.value = error instanceof Error ? error.message : "Unknown error";
+  }
+}
+
+onMounted(() => {
+  void fetchCurrentUser();
+});
+</script>
+
 <template>
   <div class="layout">
     <aside class="sidebar">
@@ -24,6 +79,25 @@
           <span class="nav-label">Repositories</span>
         </RouterLink>
       </nav>
+
+      <section class="auth-panel" aria-label="Authentication">
+        <p class="auth-title">Session</p>
+        <p class="auth-status">{{ meStatus }}</p>
+        <p v-if="me?.email || me?.login || me?.name || me?.username" class="auth-user">
+          {{ me?.name || me?.username || me?.login || me?.email }}
+        </p>
+        <button class="auth-button login" type="button" @click="loginWithGithub">
+          Login with GitHub
+        </button>
+        <button class="auth-button refresh" type="button" @click="fetchCurrentUser">
+          Refresh /api/me
+        </button>
+        <p v-if="meError" class="auth-error">{{ meError }}</p>
+        <details class="auth-raw">
+          <summary>Show /api/me response</summary>
+          <pre>{{ meRaw || "No response body yet." }}</pre>
+        </details>
+      </section>
     </aside>
 
     <main class="content">
@@ -71,6 +145,94 @@
   background:
     linear-gradient(180deg, #ffffff 0%, #f1f5f9 50%, #e2e8f0 100%);
   box-shadow: var(--shadow);
+}
+
+.auth-panel {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.8);
+}
+
+.auth-title {
+  margin: 0;
+  font-size: 0.75rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-soft);
+}
+
+.auth-status {
+  margin: 0;
+  color: var(--ink-strong);
+  font-weight: 600;
+  font-size: 0.85rem;
+}
+
+.auth-user {
+  margin: 0;
+  color: var(--ink-body);
+  font-size: 0.85rem;
+}
+
+.auth-button {
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  padding: 8px 10px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease;
+}
+
+.auth-button.login {
+  background: var(--ink-strong);
+  color: #fff;
+  border-color: var(--ink-strong);
+}
+
+.auth-button.login:hover {
+  background: #0b1220;
+}
+
+.auth-button.refresh {
+  background: #fff;
+  color: var(--ink-body);
+}
+
+.auth-button.refresh:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.auth-error {
+  margin: 0;
+  color: #b91c1c;
+  font-size: 0.8rem;
+}
+
+.auth-raw {
+  font-size: 0.8rem;
+}
+
+.auth-raw summary {
+  cursor: pointer;
+  color: var(--ink-soft);
+}
+
+.auth-raw pre {
+  margin: 6px 0 0;
+  padding: 8px;
+  border-radius: 8px;
+  background: #f1f5f9;
+  color: #0f172a;
+  overflow: auto;
+  max-height: 180px;
 }
 
 .brand {
@@ -217,6 +379,10 @@
     padding: 20px 16px 16px;
     gap: 20px;
     box-shadow: none;
+  }
+
+  .auth-panel {
+    margin-top: 0;
   }
 
   .brand {
