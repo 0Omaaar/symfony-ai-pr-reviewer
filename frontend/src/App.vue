@@ -79,25 +79,6 @@ onMounted(() => {
           <span class="nav-label">Repositories</span>
         </RouterLink>
       </nav>
-
-      <section class="auth-panel" aria-label="Authentication">
-        <p class="auth-title">Session</p>
-        <p class="auth-status">{{ meStatus }}</p>
-        <p v-if="me?.email || me?.login || me?.name || me?.username" class="auth-user">
-          {{ me?.name || me?.username || me?.login || me?.email }}
-        </p>
-        <button class="auth-button login" type="button" @click="loginWithGithub">
-          Login with GitHub
-        </button>
-        <button class="auth-button refresh" type="button" @click="fetchCurrentUser">
-          Refresh /api/me
-        </button>
-        <p v-if="meError" class="auth-error">{{ meError }}</p>
-        <details class="auth-raw">
-          <summary>Show /api/me response</summary>
-          <pre>{{ meRaw || "No response body yet." }}</pre>
-        </details>
-      </section>
     </aside>
 
     <main class="content">

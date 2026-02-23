@@ -23,4 +23,10 @@ class OAuthController extends AbstractController
     {
 
     }
+
+    #[Route('/logout', name: 'app_logout', methods: ['POST', 'GET'])]
+    public function logout(): void
+    {
+        throw new \LogicException('Logout is handled by Symfony firewall.');
+    }
 }
