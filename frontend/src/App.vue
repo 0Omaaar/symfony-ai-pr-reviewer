@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from "vue";
+import { useRouter } from "vue-router";
 
 type MeResponse = {
   id?: number | string;
@@ -11,6 +12,7 @@ type MeResponse = {
 };
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+const router = useRouter();
 const me = ref<MeResponse | null>(null);
 const meStatus = ref("Not checked");
 const meError = ref("");
@@ -48,6 +50,31 @@ async function fetchCurrentUser() {
   }
 }
 
+async function logout() {
+  meError.value = "";
+
+  try {
+    const response = await fetch(`${apiBaseUrl}/logout`, {
+      method: "POST",
+      credentials: "include",
+      redirect: "manual",
+    });
+
+    const isRedirect = response.type === "opaqueredirect" || (response.status >= 300 && response.status < 400);
+    if (!response.ok && !isRedirect) {
+      throw new Error(`Logout failed with status ${response.status}`);
+    }
+
+    me.value = null;
+    meRaw.value = "";
+    meStatus.value = "Logged out";
+    await router.push({ name: "login" });
+  } catch (error) {
+    meError.value = error instanceof Error ? error.message : "Logout failed";
+    console.error("Logout failed:", error);
+  }
+}
+
 onMounted(() => {
   void fetchCurrentUser();
 });
@@ -79,6 +106,13 @@ onMounted(() => {
           <span class="nav-label">Repositories</span>
         </RouterLink>
       </nav>
+
+      <section class="auth-panel" aria-label="Authentication">
+        <button class="logout-button" @click="logout">
+          <span class="logout-icon" aria-hidden="true">↩</span>
+          <span>Log out</span>
+        </button>
+      </section>
     </aside>
 
     <main class="content">
@@ -129,7 +163,7 @@ onMounted(() => {
 }
 
 .auth-panel {
-  margin-top: auto;
+  margin-top: 220%;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -137,6 +171,44 @@ onMounted(() => {
   border-radius: 14px;
   border: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.8);
+}
+
+.logout-button {
+  border: 1px solid #fecaca;
+  border-radius: 12px;
+  padding: 10px 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  background: linear-gradient(135deg, #fff1f2 0%, #ffe4e6 100%);
+  color: #9f1239;
+  font-size: 0.88rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.logout-button:hover {
+  transform: translateY(-1px);
+  border-color: #fda4af;
+  box-shadow: 0 10px 22px -12px rgba(159, 18, 57, 0.5);
+}
+
+.logout-button:active {
+  transform: translateY(0);
+}
+
+.logout-button:focus-visible {
+  outline: 3px solid #fecdd3;
+  outline-offset: 2px;
+}
+
+.logout-icon {
+  font-size: 0.9rem;
+  line-height: 1;
 }
 
 .auth-title {
