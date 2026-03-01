@@ -22,6 +22,10 @@ function loginWithGithub() {
   window.location.href = `${apiBaseUrl}/connect/github`;
 }
 
+function installGithubApp() {
+  window.location.href = `${apiBaseUrl}/connect/github/app/install`;
+}
+
 async function fetchCurrentUser() {
   meError.value = "";
   meStatus.value = "Loading /api/me...";
@@ -108,6 +112,10 @@ onMounted(() => {
       </nav>
 
       <section class="auth-panel" aria-label="Authentication">
+        <button v-if="me" class="install-app-button" @click="installGithubApp">
+          <span class="install-icon" aria-hidden="true">⬢</span>
+          <span>Install GitHub App</span>
+        </button>
         <button class="logout-button" @click="logout">
           <span class="logout-icon" aria-hidden="true">↩</span>
           <span>Log out</span>
@@ -163,7 +171,7 @@ onMounted(() => {
 }
 
 .auth-panel {
-  margin-top: 220%;
+  margin-top: 200%;
   display: flex;
   flex-direction: column;
   gap: 8px;
@@ -171,6 +179,44 @@ onMounted(() => {
   border-radius: 14px;
   border: 1px solid var(--line);
   background: rgba(255, 255, 255, 0.8);
+}
+
+.install-app-button {
+  border: 1px solid #bae6fd;
+  border-radius: 12px;
+  padding: 10px 12px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  width: 100%;
+  background: linear-gradient(135deg, #ecfeff 0%, #e0f2fe 100%);
+  color: #075985;
+  font-size: 0.88rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  cursor: pointer;
+  transition: transform 0.15s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+}
+
+.install-app-button:hover {
+  transform: translateY(-1px);
+  border-color: #7dd3fc;
+  box-shadow: 0 10px 22px -12px rgba(3, 105, 161, 0.45);
+}
+
+.install-app-button:active {
+  transform: translateY(0);
+}
+
+.install-app-button:focus-visible {
+  outline: 3px solid #bae6fd;
+  outline-offset: 2px;
+}
+
+.install-icon {
+  font-size: 0.95rem;
+  line-height: 1;
 }
 
 .logout-button {

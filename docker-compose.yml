@@ -8,6 +8,7 @@ services:
       DATABASE_URL: "postgresql://app:!ChangeMe!@database:5432/app?serverVersion=16&charset=utf8"
       MAILER_DSN: "smtp://mailer:1025"
       GITHUB_APP_ID: "2860467"
+      GITHUB_APP_INSTALL_URL: "https://github.com/apps/symfony-ai-pr-reviewer-bot/installations/new"
       GITHUB_WEBHOOK_SECRET: "symfony-ai-pr-reviewer-bot-12345"
       GITHUB_PRIVATE_KEY_PATH: "/app/var/github-app.pem"
       GITHUB_OAUTH_CLIENT_ID: "Ov23liDLvehNpHVw89EG"

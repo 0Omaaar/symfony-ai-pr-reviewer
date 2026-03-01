@@ -3,6 +3,8 @@
 namespace App\Entity;
 
 use App\Repository\UserRepository;
+use Doctrine\Common\Collections\ArrayCollection;
+use Doctrine\Common\Collections\Collection;
 use Doctrine\ORM\Mapping as ORM;
 use Symfony\Component\Security\Core\User\PasswordAuthenticatedUserInterface;
 use Symfony\Component\Security\Core\User\UserInterface;
@@ -37,6 +39,17 @@ class User implements UserInterface, PasswordAuthenticatedUserInterface
 
     #[ORM\Column(length: 100, nullable: true)]
     private ?string $githubUsername = null;
+
+    /**
+     * @var Collection<int, UserGithubInstallation>
+     */
+    #[ORM\OneToMany(targetEntity: UserGithubInstallation::class, mappedBy: 'appUser', orphanRemoval: true)]
+    private Collection $githubInstallations;
+
+    public function __construct()
+    {
+        $this->githubInstallations = new ArrayCollection();
+    }
 
     public function getId(): ?int
     {
@@ -133,6 +146,31 @@ class User implements UserInterface, PasswordAuthenticatedUserInterface
     public function setGithubUsername(?string $githubUsername): static
     {
         $this->githubUsername = $githubUsername;
+
+        return $this;
+    }
+
+    /**
+     * @return Collection<int, UserGithubInstallation>
+     */
+    public function getGithubInstallations(): Collection
+    {
+        return $this->githubInstallations;
+    }
+
+    public function addGithubInstallation(UserGithubInstallation $githubInstallation): static
+    {
+        if (!$this->githubInstallations->contains($githubInstallation)) {
+            $this->githubInstallations->add($githubInstallation);
+            $githubInstallation->setAppUser($this);
+        }
+
+        return $this;
+    }
+
+    public function removeGithubInstallation(UserGithubInstallation $githubInstallation): static
+    {
+        $this->githubInstallations->removeElement($githubInstallation);
 
         return $this;
     }

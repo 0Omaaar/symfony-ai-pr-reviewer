@@ -34,6 +34,7 @@ security:
     access_control:
         - { path: ^/connect/github, roles: PUBLIC_ACCESS }
         - { path: ^/connect/github/check, roles: PUBLIC_ACCESS }
+        - { path: ^/connect/github/app/setup, roles: PUBLIC_ACCESS }
         - { path: ^/api/me, roles: PUBLIC_ACCESS }
 
 when@test:
