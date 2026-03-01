@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Controller;
+namespace App\Controller\Api\Github\Auth;
 
 use App\Entity\GithubInstallation;
 use App\Entity\User;

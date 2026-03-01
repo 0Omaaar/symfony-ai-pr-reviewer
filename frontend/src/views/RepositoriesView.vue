@@ -1,19 +1,85 @@
 <script setup lang="ts">
-import { computed, ref, watch } from "vue";
-import { mockRepos, type Repository } from "../mocks/repos";
+import { computed, onMounted, ref, watch } from "vue";
+import type { Repository } from "@/types/repository";
 import { useRouter } from "vue-router";
 
 const search = ref("");
 const router = useRouter();
+const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+const repos = ref<Repository[]>([]);
+const isLoading = ref(false);
 
 function goToRepo(id: number) {
-  router.push({name: "repo-details", params: {id}})
+  router.push({ name: "repo-details", params: { id } });
 }
+
+type GithubRepositoryApiItem = {
+  id?: number;
+  name?: string;
+  full_name?: string;
+};
+
+type GithubRepositoriesApiResponse = {
+  ok?: boolean;
+  repositories?: GithubRepositoryApiItem[];
+};
+
+function mapApiRepository(item: GithubRepositoryApiItem): Repository | null {
+  if (typeof item.id !== "number") return null;
+  const fullName = typeof item.full_name === "string" && item.full_name !== "" ? item.full_name : item.name;
+  if (typeof fullName !== "string" || fullName === "") return null;
+
+  return {
+    id: item.id,
+    provider: "github",
+    fullName,
+    policyPack: "Not assigned",
+    lastReviewAt: null,
+  };
+}
+
+const userRepos = async (): Promise<GithubRepositoriesApiResponse> => {
+  const res = await fetch(`${apiBaseUrl}/api/github/repositories`, {
+    credentials: "include",
+  });
+
+  if (!res.ok) {
+    throw new Error(`Failed to fetch repositories (${res.status})`);
+  }
+
+  return (await res.json()) as GithubRepositoriesApiResponse;
+};
+
+async function loadUserRepos() {
+  isLoading.value = true;
+
+  try {
+    const data = await userRepos();
+    if (!Array.isArray(data.repositories)) {
+      repos.value = [];
+      return;
+    }
+
+    const mapped = data.repositories
+      .map(mapApiRepository)
+      .filter((item): item is Repository => item !== null);
+
+    repos.value = mapped;
+  } catch {
+    repos.value = [];
+  } finally {
+    isLoading.value = false;
+  }
+}
+
+onMounted(() => {
+  void loadUserRepos();
+});
 
 const filteredRepos = computed(() => {
   const q = search.value.trim().toLowerCase();
-  if (!q) return mockRepos;
-  return mockRepos.filter((r: Repository) =>
+  if (!q) return repos.value;
+  return repos.value.filter((r: Repository) =>
     r.fullName.toLowerCase().includes(q)
   );
 });
@@ -117,7 +183,12 @@ function reviewStatus(lastReviewAt: string | null) {
       </div>
     </header>
 
-    <div class="table-shell">
+    <div v-if="isLoading" class="loader-shell" role="status" aria-live="polite">
+      <span class="loader" aria-hidden="true"></span>
+      <p>Loading repositories...</p>
+    </div>
+
+    <div v-else class="table-shell">
       <table class="table" aria-label="Repositories list">
         <colgroup>
           <col class="col-provider" />
@@ -174,7 +245,7 @@ function reviewStatus(lastReviewAt: string | null) {
       </table>
     </div>
 
-    <footer v-if="filteredRepos.length > 0" class="pagination">
+    <footer v-if="!isLoading && filteredRepos.length > 0" class="pagination">
       <p class="page-summary">
         Showing {{ pageStart }}-{{ pageEnd }} of {{ filteredRepos.length }}
       </p>
@@ -324,6 +395,28 @@ function reviewStatus(lastReviewAt: string | null) {
   background: var(--surface);
   overflow: hidden;
   box-shadow: var(--shadow);
+}
+
+.loader-shell {
+  min-height: 260px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 10px;
+  color: var(--ink-soft);
+}
+
+.loader {
+  width: 30px;
+  height: 30px;
+  border-radius: 999px;
+  border: 3px solid #dbe5f0;
+  border-top-color: var(--accent);
+  animation: spin 0.8s linear infinite;
 }
 
 .table {
@@ -554,6 +647,12 @@ tbody tr:last-child td {
 .page-btn:disabled {
   cursor: not-allowed;
   opacity: 0.5;
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
 }
 
 @media (max-width: 1024px) {

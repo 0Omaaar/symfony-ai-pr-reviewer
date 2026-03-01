@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Controller\Api;
+namespace App\Controller\Api\Github\Webhook;
 
 use App\Message\ReviewPullRequestMessage;
 use Psr\Log\LoggerInterface;
