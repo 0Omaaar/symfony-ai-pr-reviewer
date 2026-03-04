@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRoute, RouterLink } from "vue-router";
 import { router } from "@/router";
 import type { PullRequest } from "@/types/pr";
@@ -111,6 +111,11 @@ const prs = ref<PullRequest[]>([]);
 const insights = ref<RepositoryInsights | null>(null);
 const isLoading = ref(false);
 const loadError = ref("");
+const newPrAlert = ref("");
+let clearAlertTimeout: ReturnType<typeof setTimeout> | null = null;
+let pollInterval: ReturnType<typeof setInterval> | null = null;
+
+const PR_POLL_INTERVAL_MS = 30000;
 
 function mapRepositoryDetails(item: GithubRepositoryDetailsApiItem): RepositoryDetails | null {
     if (typeof item.id !== "number" || typeof item.name !== "string") {
@@ -197,18 +202,43 @@ function mapInsights(item: GithubRepositoryInsightsApiItem | undefined): Reposit
     };
 }
 
-async function loadRepoDetails() {
+function showNewPrAlert(message: string) {
+    newPrAlert.value = message;
+    if (clearAlertTimeout) {
+        clearTimeout(clearAlertTimeout);
+    }
+    clearAlertTimeout = setTimeout(() => {
+        newPrAlert.value = "";
+        clearAlertTimeout = null;
+    }, 8000);
+}
+
+function dismissNewPrAlert() {
+    newPrAlert.value = "";
+    if (clearAlertTimeout) {
+        clearTimeout(clearAlertTimeout);
+        clearAlertTimeout = null;
+    }
+}
+
+async function loadRepoDetails(options: { silent?: boolean } = {}) {
+    const silent = options.silent === true;
+
     if (!Number.isFinite(repoId.value) || repoId.value <= 0) {
-        repo.value = null;
-        branches.value = [];
-        prs.value = [];
-        insights.value = null;
+        if (!silent) {
+            repo.value = null;
+            branches.value = [];
+            prs.value = [];
+            insights.value = null;
+        }
         loadError.value = "Invalid repository id.";
         return;
     }
 
-    isLoading.value = true;
-    loadError.value = "";
+    if (!silent) {
+        isLoading.value = true;
+        loadError.value = "";
+    }
 
     try {
         const res = await fetch(`${apiBaseUrl}/api/github/repositories/${repoId.value}`, {
@@ -216,10 +246,12 @@ async function loadRepoDetails() {
         });
 
         if (res.status === 404) {
-            repo.value = null;
-            branches.value = [];
-            prs.value = [];
-            insights.value = null;
+            if (!silent) {
+                repo.value = null;
+                branches.value = [];
+                prs.value = [];
+                insights.value = null;
+            }
             return;
         }
 
@@ -229,31 +261,64 @@ async function loadRepoDetails() {
 
         const data = (await res.json()) as GithubRepositoryDetailsApiResponse;
         const mapped = data.repository ? mapRepositoryDetails(data.repository) : null;
+        const previousPrIds = new Set(prs.value.map((pullRequest) => pullRequest.id));
+        const hadPreviousData = prs.value.length > 0;
+        const nextPrs = Array.isArray(data.pull_requests)
+            ? data.pull_requests.map(mapPullRequest).filter((item): item is PullRequest => item !== null)
+            : [];
+
         repo.value = mapped;
         branches.value = Array.isArray(data.branches)
             ? data.branches.map(mapRepositoryBranch).filter((item): item is RepositoryBranch => item !== null)
             : [];
-        prs.value = Array.isArray(data.pull_requests)
-            ? data.pull_requests.map(mapPullRequest).filter((item): item is PullRequest => item !== null)
-            : [];
+        prs.value = nextPrs;
         insights.value = mapInsights(data.insights);
+
+        if (silent && hadPreviousData) {
+            const newPullRequests = nextPrs.filter((pullRequest) => !previousPrIds.has(pullRequest.id));
+            if (newPullRequests.length === 1) {
+                showNewPrAlert(`New pull request #${newPullRequests[0].number} added to this repository.`);
+            } else if (newPullRequests.length > 1) {
+                showNewPrAlert(`${newPullRequests.length} new pull requests were added to this repository.`);
+            }
+        }
     } catch (error) {
-        repo.value = null;
-        branches.value = [];
-        prs.value = [];
-        insights.value = null;
+        if (!silent) {
+            repo.value = null;
+            branches.value = [];
+            prs.value = [];
+            insights.value = null;
+        }
         loadError.value = error instanceof Error ? error.message : "Failed to load repository.";
     } finally {
-        isLoading.value = false;
+        if (!silent) {
+            isLoading.value = false;
+        }
     }
 }
 
 onMounted(() => {
     void loadRepoDetails();
+    pollInterval = setInterval(() => {
+        void loadRepoDetails({ silent: true });
+    }, PR_POLL_INTERVAL_MS);
 });
 
 watch(() => route.params.id, () => {
+    dismissNewPrAlert();
     void loadRepoDetails();
+});
+
+onUnmounted(() => {
+    if (pollInterval) {
+        clearInterval(pollInterval);
+        pollInterval = null;
+    }
+
+    if (clearAlertTimeout) {
+        clearTimeout(clearAlertTimeout);
+        clearAlertTimeout = null;
+    }
 });
 
 function formatDate(iso: string | null) {
@@ -293,6 +358,15 @@ function goToPr(id: number) {
 <template>
     <section class="repo-details-view">
         <RouterLink to="/repos" class="back-link">Back to repositories</RouterLink>
+        <transition name="toast-pop">
+            <div v-if="newPrAlert" class="pr-toast" role="status" aria-live="polite">
+                <div class="pr-toast-copy">
+                    <p class="pr-toast-title">New Pull Request</p>
+                    <p class="pr-toast-message">{{ newPrAlert }}</p>
+                </div>
+                <button type="button" class="alert-close" @click="dismissNewPrAlert">Dismiss</button>
+            </div>
+        </transition>
 
         <article v-if="isLoading" class="panel state-panel" role="status" aria-live="polite">
             <span class="loader" aria-hidden="true"></span>
@@ -579,6 +653,61 @@ function goToPr(id: number) {
     border-color: #f4c1c1;
     background: #fff1f1;
     color: #8f1f1f;
+}
+
+.pr-toast {
+    position: fixed;
+    top: 20px;
+    right: 20px;
+    z-index: 70;
+    width: min(420px, calc(100vw - 24px));
+    border: 1px solid #9fd6ed;
+    border-radius: 14px;
+    background: linear-gradient(135deg, #f0f9ff 0%, #e6f4ff 100%);
+    box-shadow: 0 16px 36px -18px rgba(14, 116, 144, 0.5);
+    padding: 12px;
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.pr-toast-title {
+    margin: 0;
+    color: #0c4a6e;
+    font-size: 0.76rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-weight: 800;
+}
+
+.pr-toast-message {
+    margin: 6px 0 0;
+    color: #155c7f;
+    font-weight: 600;
+    line-height: 1.4;
+}
+
+.alert-close {
+    border: 1px solid #9fd6ed;
+    border-radius: 8px;
+    background: #ffffff;
+    color: #155c7f;
+    font-weight: 700;
+    font-size: 0.8rem;
+    padding: 5px 9px;
+    cursor: pointer;
+}
+
+.toast-pop-enter-active,
+.toast-pop-leave-active {
+    transition: opacity 0.2s ease, transform 0.2s ease;
+}
+
+.toast-pop-enter-from,
+.toast-pop-leave-to {
+    opacity: 0;
+    transform: translateY(-10px) scale(0.98);
 }
 
 .state-panel {
@@ -975,6 +1104,13 @@ function goToPr(id: number) {
 }
 
 @media (max-width: 900px) {
+    .pr-toast {
+        right: 12px;
+        left: 12px;
+        width: auto;
+        top: 12px;
+    }
+
     .hero {
         flex-direction: column;
         align-items: flex-start;
