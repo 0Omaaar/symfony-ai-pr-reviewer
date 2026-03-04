@@ -8,6 +8,7 @@ const router = useRouter();
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 const repos = ref<Repository[]>([]);
 const isLoading = ref(false);
+const fetchError = ref("");
 
 function goToRepo(id: number) {
   router.push({ name: "repo-details", params: { id } });
@@ -33,8 +34,6 @@ function mapApiRepository(item: GithubRepositoryApiItem): Repository | null {
     id: item.id,
     provider: "github",
     fullName,
-    policyPack: "Not assigned",
-    lastReviewAt: null,
   };
 }
 
@@ -52,6 +51,7 @@ const userRepos = async (): Promise<GithubRepositoriesApiResponse> => {
 
 async function loadUserRepos() {
   isLoading.value = true;
+  fetchError.value = "";
 
   try {
     const data = await userRepos();
@@ -65,8 +65,9 @@ async function loadUserRepos() {
       .filter((item): item is Repository => item !== null);
 
     repos.value = mapped;
-  } catch {
+  } catch (error) {
     repos.value = [];
+    fetchError.value = error instanceof Error ? error.message : "Failed to fetch repositories.";
   } finally {
     isLoading.value = false;
   }
@@ -129,14 +130,6 @@ const resultsLabel = computed(() => {
   return `${count} repositor${count === 1 ? "y" : "ies"}`;
 });
 
-function formatDate(iso: string | null) {
-  if (!iso) return "Never";
-  return new Date(iso).toLocaleString("en-US", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  });
-}
-
 function providerLabel(provider: Repository["provider"]) {
   if (provider === "github") return "GitHub";
   if (provider === "gitlab") return "GitLab";
@@ -148,11 +141,6 @@ function providerClass(provider: Repository["provider"]) {
   if (provider === "gitlab") return "is-gitlab";
   return "is-unknown";
 }
-
-function reviewStatus(lastReviewAt: string | null) {
-  if (!lastReviewAt) return { label: "Never", className: "never" };
-  return { label: "Reviewed", className: "reviewed" };
-}
 </script>
 
 <template>
@@ -161,7 +149,7 @@ function reviewStatus(lastReviewAt: string | null) {
       <div class="head-copy">
         <h1 class="title">Repositories</h1>
         <p class="subtitle">
-          Track connected source repositories and policy pack coverage from one place.
+          Track connected source repositories from one place.
         </p>
       </div>
 
@@ -183,6 +171,10 @@ function reviewStatus(lastReviewAt: string | null) {
       </div>
     </header>
 
+    <div v-if="fetchError" class="alert error" role="alert">
+      {{ fetchError }}
+    </div>
+
     <div v-if="isLoading" class="loader-shell" role="status" aria-live="polite">
       <span class="loader" aria-hidden="true"></span>
       <p>Loading repositories...</p>
@@ -193,16 +185,12 @@ function reviewStatus(lastReviewAt: string | null) {
         <colgroup>
           <col class="col-provider" />
           <col class="col-repo" />
-          <col class="col-policy" />
-          <col class="col-review" />
         </colgroup>
 
         <thead>
           <tr>
             <th>Provider</th>
             <th>Repository</th>
-            <th>Policy pack</th>
-            <th>Last review</th>
           </tr>
         </thead>
 
@@ -217,23 +205,10 @@ function reviewStatus(lastReviewAt: string | null) {
             <td data-label="Repository" class="repo-cell">
               {{ repo.fullName }}
             </td>
-
-            <td data-label="Policy pack">
-              <span class="policy-pill mono">{{ repo.policyPack }}</span>
-            </td>
-
-            <td data-label="Last review" class="review-cell">
-              <span class="review-chip" :class="reviewStatus(repo.lastReviewAt).className">
-                {{ reviewStatus(repo.lastReviewAt).label }}
-              </span>
-              <span v-if="repo.lastReviewAt" class="review-date">
-                {{ formatDate(repo.lastReviewAt) }}
-              </span>
-            </td>
           </tr>
 
           <tr v-if="filteredRepos.length === 0" class="empty-row">
-            <td colspan="4" class="empty-cell">
+            <td colspan="2" class="empty-cell">
               <div class="empty">
                 <span class="empty-icon" aria-hidden="true">0</span>
                 <p class="empty-title">No repositories found.</p>
@@ -299,10 +274,6 @@ function reviewStatus(lastReviewAt: string | null) {
   --github-ink: #304e9b;
   --gitlab-bg: #ffefe7;
   --gitlab-ink: #a14b21;
-  --ok-bg: #e8f8ee;
-  --ok-ink: #21693c;
-  --never-bg: #f3f4f6;
-  --never-ink: #4b5563;
   --shadow: 0 20px 50px -12px rgba(15, 23, 42, 0.2);
   display: grid;
   gap: 16px;
@@ -389,6 +360,19 @@ function reviewStatus(lastReviewAt: string | null) {
   letter-spacing: 0.02em;
 }
 
+.alert {
+  border-radius: 12px;
+  border: 1px solid;
+  padding: 10px 12px;
+  font-size: 0.9rem;
+}
+
+.alert.error {
+  border-color: #f4c1c1;
+  background: #fff1f1;
+  color: #8f1f1f;
+}
+
 .table-shell {
   border: 1px solid var(--line);
   border-radius: 18px;
@@ -426,16 +410,11 @@ function reviewStatus(lastReviewAt: string | null) {
 }
 
 .col-provider {
-  width: 17%;
+  width: 24%;
 }
 
 .col-repo {
-  width: 37%;
-}
-
-.col-policy,
-.col-review {
-  width: 23%;
+  width: 76%;
 }
 
 thead th {
@@ -502,50 +481,6 @@ tbody tr:last-child td {
   background: #eef2f7;
   color: #475569;
   border-color: #d4dde8;
-}
-
-.policy-pill {
-  display: inline-block;
-  max-width: 100%;
-  padding: 4px 10px;
-  border-radius: 8px;
-  border: 1px solid #d5e4fa;
-  background: #eef5ff;
-  color: #2f4f7c;
-  font-size: 0.82rem;
-  white-space: normal;
-}
-
-.review-cell {
-  display: grid;
-  gap: 6px;
-}
-
-.review-chip {
-  width: fit-content;
-  padding: 4px 10px;
-  border-radius: 999px;
-  border: 1px solid transparent;
-  font-size: 0.76rem;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-}
-
-.review-chip.reviewed {
-  color: var(--ok-ink);
-  background: var(--ok-bg);
-  border-color: #c8e8d3;
-}
-
-.review-chip.never {
-  color: var(--never-ink);
-  background: var(--never-bg);
-  border-color: #e2e8f0;
-}
-
-.review-date {
-  font-size: 0.84rem;
-  color: var(--ink-soft);
 }
 
 .mono {
@@ -726,21 +661,6 @@ tbody tr:last-child td {
     font-weight: 700;
   }
 
-  .review-cell {
-    display: grid;
-    grid-template-columns: 112px 1fr;
-    gap: 10px;
-  }
-
-  .review-cell::before {
-    content: attr(data-label);
-    color: #6f8095;
-    font-size: 0.74rem;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    font-weight: 700;
-  }
-
   .empty-row td,
   .empty-row td::before {
     content: none;
@@ -766,8 +686,7 @@ tbody tr:last-child td {
     width: 100%;
   }
 
-  tbody tr td,
-  .review-cell {
+  tbody tr td {
     grid-template-columns: 92px 1fr;
   }
 }

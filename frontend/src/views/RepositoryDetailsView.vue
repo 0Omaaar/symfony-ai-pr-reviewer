@@ -1,15 +1,260 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { useRoute, RouterLink } from "vue-router";
-import { mockRepos } from "../mocks/repos";
-import { mockPRs } from "@/mocks/prs";
 import { router } from "@/router";
+import type { PullRequest } from "@/types/pr";
 
 const route = useRoute();
-const repoId = Number(route.params.id);
+const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+const repoId = computed(() => Number(route.params.id));
 
-const repo = computed(() => mockRepos.find((r) => r.id === repoId) ?? null);
-const prs = computed(() => mockPRs.filter((p) => p.repoId === repoId) ?? []);
+type RepositoryDetails = {
+    id: number;
+    provider: "github";
+    fullName: string;
+    name: string;
+    private: boolean;
+    htmlUrl: string | null;
+    defaultBranch: string | null;
+    installationId: number | null;
+};
+
+type GithubRepositoryDetailsApiItem = {
+    id?: number;
+    name?: string;
+    full_name?: string;
+    private?: boolean;
+    html_url?: string;
+    default_branch?: string;
+    installation_id?: number;
+};
+
+type GithubRepositoryDetailsApiResponse = {
+    ok?: boolean;
+    repository?: GithubRepositoryDetailsApiItem;
+    branches?: GithubRepositoryBranchApiItem[];
+    pull_requests?: GithubPullRequestApiItem[];
+    insights?: GithubRepositoryInsightsApiItem;
+};
+
+type GithubRepositoryBranchApiItem = {
+    name?: string;
+    protected?: boolean;
+    commit_sha?: string;
+};
+
+type RepositoryBranch = {
+    name: string;
+    protected: boolean;
+    commitSha: string | null;
+};
+
+type GithubPullRequestApiItem = {
+    id?: number;
+    repo_id?: number;
+    number?: number;
+    title?: string;
+    status?: "open" | "merged" | "closed";
+    head_sha?: string;
+    updated_at?: string;
+};
+
+type GithubRepositoryInsightsApiItem = {
+    commits_count?: number;
+    participants_count?: number;
+    participants?: GithubRepositoryParticipantApiItem[];
+    stargazers_count?: number;
+    forks_count?: number;
+    open_issues_count?: number;
+    watchers_count?: number;
+    size_kb?: number;
+    primary_language?: string | null;
+    topics?: string[];
+    created_at?: string | null;
+    updated_at?: string | null;
+    pushed_at?: string | null;
+};
+
+type GithubRepositoryParticipantApiItem = {
+    login?: string;
+    avatar_url?: string | null;
+    html_url?: string | null;
+    contributions?: number | null;
+};
+
+type RepositoryParticipant = {
+    login: string;
+    avatarUrl: string | null;
+    htmlUrl: string | null;
+    contributions: number | null;
+};
+
+type RepositoryInsights = {
+    commitsCount: number;
+    participantsCount: number;
+    participants: RepositoryParticipant[];
+    stargazersCount: number;
+    forksCount: number;
+    openIssuesCount: number;
+    watchersCount: number;
+    sizeKb: number;
+    primaryLanguage: string | null;
+    topics: string[];
+    createdAt: string | null;
+    updatedAt: string | null;
+    pushedAt: string | null;
+};
+
+const repo = ref<RepositoryDetails | null>(null);
+const branches = ref<RepositoryBranch[]>([]);
+const prs = ref<PullRequest[]>([]);
+const insights = ref<RepositoryInsights | null>(null);
+const isLoading = ref(false);
+const loadError = ref("");
+
+function mapRepositoryDetails(item: GithubRepositoryDetailsApiItem): RepositoryDetails | null {
+    if (typeof item.id !== "number" || typeof item.name !== "string") {
+        return null;
+    }
+
+    const fullName = typeof item.full_name === "string" && item.full_name !== "" ? item.full_name : item.name;
+
+    return {
+        id: item.id,
+        provider: "github",
+        fullName,
+        name: item.name,
+        private: Boolean(item.private),
+        htmlUrl: typeof item.html_url === "string" ? item.html_url : null,
+        defaultBranch: typeof item.default_branch === "string" ? item.default_branch : null,
+        installationId: typeof item.installation_id === "number" ? item.installation_id : null,
+    };
+}
+
+function mapRepositoryBranch(item: GithubRepositoryBranchApiItem): RepositoryBranch | null {
+    if (typeof item.name !== "string" || item.name === "") {
+        return null;
+    }
+
+    return {
+        name: item.name,
+        protected: Boolean(item.protected),
+        commitSha: typeof item.commit_sha === "string" ? item.commit_sha : null,
+    };
+}
+
+function mapPullRequest(item: GithubPullRequestApiItem): PullRequest | null {
+    if (typeof item.id !== "number" || typeof item.number !== "number") {
+        return null;
+    }
+
+    const status = item.status === "merged" || item.status === "closed" ? item.status : "open";
+    const updatedAt = typeof item.updated_at === "string" ? item.updated_at : new Date().toISOString();
+
+    return {
+        id: item.id,
+        repoId: typeof item.repo_id === "number" ? item.repo_id : repoId.value,
+        number: item.number,
+        title: typeof item.title === "string" && item.title !== "" ? item.title : "(No title)",
+        status,
+        headSha: typeof item.head_sha === "string" && item.head_sha !== "" ? item.head_sha : "N/A",
+        updatedAt,
+    };
+}
+
+function mapParticipant(item: GithubRepositoryParticipantApiItem): RepositoryParticipant | null {
+    if (typeof item.login !== "string" || item.login === "") {
+        return null;
+    }
+
+    return {
+        login: item.login,
+        avatarUrl: typeof item.avatar_url === "string" ? item.avatar_url : null,
+        htmlUrl: typeof item.html_url === "string" ? item.html_url : null,
+        contributions: typeof item.contributions === "number" ? item.contributions : null,
+    };
+}
+
+function mapInsights(item: GithubRepositoryInsightsApiItem | undefined): RepositoryInsights | null {
+    if (!item) return null;
+
+    return {
+        commitsCount: typeof item.commits_count === "number" ? item.commits_count : 0,
+        participantsCount: typeof item.participants_count === "number" ? item.participants_count : 0,
+        participants: Array.isArray(item.participants)
+            ? item.participants.map(mapParticipant).filter((participant): participant is RepositoryParticipant => participant !== null)
+            : [],
+        stargazersCount: typeof item.stargazers_count === "number" ? item.stargazers_count : 0,
+        forksCount: typeof item.forks_count === "number" ? item.forks_count : 0,
+        openIssuesCount: typeof item.open_issues_count === "number" ? item.open_issues_count : 0,
+        watchersCount: typeof item.watchers_count === "number" ? item.watchers_count : 0,
+        sizeKb: typeof item.size_kb === "number" ? item.size_kb : 0,
+        primaryLanguage: typeof item.primary_language === "string" ? item.primary_language : null,
+        topics: Array.isArray(item.topics) ? item.topics.filter((topic): topic is string => typeof topic === "string") : [],
+        createdAt: typeof item.created_at === "string" ? item.created_at : null,
+        updatedAt: typeof item.updated_at === "string" ? item.updated_at : null,
+        pushedAt: typeof item.pushed_at === "string" ? item.pushed_at : null,
+    };
+}
+
+async function loadRepoDetails() {
+    if (!Number.isFinite(repoId.value) || repoId.value <= 0) {
+        repo.value = null;
+        branches.value = [];
+        prs.value = [];
+        insights.value = null;
+        loadError.value = "Invalid repository id.";
+        return;
+    }
+
+    isLoading.value = true;
+    loadError.value = "";
+
+    try {
+        const res = await fetch(`${apiBaseUrl}/api/github/repositories/${repoId.value}`, {
+            credentials: "include",
+        });
+
+        if (res.status === 404) {
+            repo.value = null;
+            branches.value = [];
+            prs.value = [];
+            insights.value = null;
+            return;
+        }
+
+        if (!res.ok) {
+            throw new Error(`Failed to fetch repository (${res.status})`);
+        }
+
+        const data = (await res.json()) as GithubRepositoryDetailsApiResponse;
+        const mapped = data.repository ? mapRepositoryDetails(data.repository) : null;
+        repo.value = mapped;
+        branches.value = Array.isArray(data.branches)
+            ? data.branches.map(mapRepositoryBranch).filter((item): item is RepositoryBranch => item !== null)
+            : [];
+        prs.value = Array.isArray(data.pull_requests)
+            ? data.pull_requests.map(mapPullRequest).filter((item): item is PullRequest => item !== null)
+            : [];
+        insights.value = mapInsights(data.insights);
+    } catch (error) {
+        repo.value = null;
+        branches.value = [];
+        prs.value = [];
+        insights.value = null;
+        loadError.value = error instanceof Error ? error.message : "Failed to load repository.";
+    } finally {
+        isLoading.value = false;
+    }
+}
+
+onMounted(() => {
+    void loadRepoDetails();
+});
+
+watch(() => route.params.id, () => {
+    void loadRepoDetails();
+});
 
 function formatDate(iso: string | null) {
     if (!iso) return "Never";
@@ -19,19 +264,19 @@ function formatDate(iso: string | null) {
     });
 }
 
-function providerLabel(provider: "github" | "gitlab") {
+function providerLabel(provider: "github") {
     if (provider === "github") return "GitHub";
-    return "GitLab";
+    return "GitHub";
 }
 
-function providerClass(provider: "github" | "gitlab") {
+function providerClass(provider: "github") {
     if (provider === "github") return "is-github";
-    return "is-gitlab";
+    return "is-github";
 }
 
-function reviewStatus(lastReviewAt: string | null) {
-    if (!lastReviewAt) return { label: "Never reviewed", className: "never" };
-    return { label: "Reviewed", className: "reviewed" };
+function visibilityStatus(isPrivate: boolean) {
+    if (isPrivate) return { label: "Private", className: "never" };
+    return { label: "Public", className: "reviewed" };
 }
 
 function prStatusClass(status: "open" | "merged" | "closed") {
@@ -41,7 +286,7 @@ function prStatusClass(status: "open" | "merged" | "closed") {
 }
 
 function goToPr(id: number) {
-    router.push({name: 'pr-details', params: {id}})
+    router.push({ name: "pr-details", params: { id }, query: { repoId: String(repoId.value) } });
 }
 </script>
 
@@ -49,7 +294,14 @@ function goToPr(id: number) {
     <section class="repo-details-view">
         <RouterLink to="/repos" class="back-link">Back to repositories</RouterLink>
 
-        <article v-if="repo" class="panel">
+        <article v-if="isLoading" class="panel state-panel" role="status" aria-live="polite">
+            <span class="loader" aria-hidden="true"></span>
+            <p class="subtitle">Loading repository details...</p>
+        </article>
+
+        <article v-else-if="repo" class="panel">
+            <div v-if="loadError" class="alert error" role="alert">{{ loadError }}</div>
+
             <header class="hero">
                 <div class="hero-copy">
                     <p class="eyebrow">Repository Details</p>
@@ -61,8 +313,8 @@ function goToPr(id: number) {
                     <span class="chip provider-chip" :class="providerClass(repo.provider)">
                         {{ providerLabel(repo.provider) }}
                     </span>
-                    <span class="chip review-chip" :class="reviewStatus(repo.lastReviewAt).className">
-                        {{ reviewStatus(repo.lastReviewAt).label }}
+                    <span class="chip review-chip" :class="visibilityStatus(repo.private).className">
+                        {{ visibilityStatus(repo.private).label }}
                     </span>
                 </div>
             </header>
@@ -74,13 +326,138 @@ function goToPr(id: number) {
                 </div>
 
                 <div class="meta-item">
-                    <p class="meta-label">Policy pack</p>
-                    <p class="meta-value mono">{{ repo.policyPack }}</p>
+                    <p class="meta-label">Default branch</p>
+                    <p class="meta-value mono">{{ repo.defaultBranch ?? "Unknown" }}</p>
                 </div>
 
                 <div class="meta-item">
-                    <p class="meta-label">Last review</p>
-                    <p class="meta-value">{{ formatDate(repo.lastReviewAt) }}</p>
+                    <p class="meta-label">Repository ID</p>
+                    <p class="meta-value mono">{{ repo.id }}</p>
+                </div>
+
+                <div class="meta-item">
+                    <p class="meta-label">Installation ID</p>
+                    <p class="meta-value mono">{{ repo.installationId ?? "Unknown" }}</p>
+                </div>
+
+                <div class="meta-item">
+                    <p class="meta-label">Name</p>
+                    <p class="meta-value mono">{{ repo.name }}</p>
+                </div>
+
+                <div class="meta-item">
+                    <p class="meta-label">Repository URL</p>
+                    <p class="meta-value">
+                        <a v-if="repo.htmlUrl" :href="repo.htmlUrl" target="_blank" rel="noopener noreferrer" class="repo-link">
+                            Open on GitHub
+                        </a>
+                        <span v-else>Unavailable</span>
+                    </p>
+                </div>
+            </section>
+
+            <section class="branches-panel" aria-label="Repository branches">
+                <h2 class="section-title">Branches</h2>
+                <ul v-if="branches.length > 0" class="branches-list">
+                    <li v-for="branch in branches" :key="branch.name" class="branch-item">
+                        <span class="sha-pill mono">{{ branch.name }}</span>
+                        <span class="status-pill" :class="branch.protected ? 'is-merged' : 'is-open'">
+                            {{ branch.protected ? "protected" : "unprotected" }}
+                        </span>
+                        <span class="mono branch-sha">
+                            {{ branch.commitSha ? branch.commitSha.slice(0, 12) : "No SHA" }}
+                        </span>
+                    </li>
+                </ul>
+                <p v-else class="section-note">No branches found.</p>
+            </section>
+
+            <section v-if="insights" class="insights-panel" aria-label="Repository insights">
+                <h2 class="section-title">Repository Insights</h2>
+
+                <div class="insights-grid">
+                    <div class="insight-card">
+                        <p class="insight-label">Commits</p>
+                        <p class="insight-value">{{ insights.commitsCount }}</p>
+                    </div>
+                    <div class="insight-card">
+                        <p class="insight-label">Participants</p>
+                        <p class="insight-value">{{ insights.participantsCount }}</p>
+                    </div>
+                    <div class="insight-card">
+                        <p class="insight-label">Stars</p>
+                        <p class="insight-value">{{ insights.stargazersCount }}</p>
+                    </div>
+                    <div class="insight-card">
+                        <p class="insight-label">Forks</p>
+                        <p class="insight-value">{{ insights.forksCount }}</p>
+                    </div>
+                    <div class="insight-card">
+                        <p class="insight-label">Open issues</p>
+                        <p class="insight-value">{{ insights.openIssuesCount }}</p>
+                    </div>
+                    <div class="insight-card">
+                        <p class="insight-label">Watchers</p>
+                        <p class="insight-value">{{ insights.watchersCount }}</p>
+                    </div>
+                </div>
+
+                <div class="meta-grid insights-meta">
+                    <div class="meta-item">
+                        <p class="meta-label">Primary language</p>
+                        <p class="meta-value">{{ insights.primaryLanguage ?? "Unknown" }}</p>
+                    </div>
+                    <div class="meta-item">
+                        <p class="meta-label">Size</p>
+                        <p class="meta-value">{{ insights.sizeKb }} KB</p>
+                    </div>
+                    <div class="meta-item">
+                        <p class="meta-label">Created</p>
+                        <p class="meta-value">{{ formatDate(insights.createdAt) }}</p>
+                    </div>
+                    <div class="meta-item">
+                        <p class="meta-label">Updated</p>
+                        <p class="meta-value">{{ formatDate(insights.updatedAt) }}</p>
+                    </div>
+                    <div class="meta-item">
+                        <p class="meta-label">Last push</p>
+                        <p class="meta-value">{{ formatDate(insights.pushedAt) }}</p>
+                    </div>
+                    <div class="meta-item">
+                        <p class="meta-label">Topics</p>
+                        <p class="meta-value">
+                            <span v-if="insights.topics.length === 0">None</span>
+                            <span v-else class="topics">
+                                <span v-for="topic in insights.topics" :key="topic" class="sha-pill">{{ topic }}</span>
+                            </span>
+                        </p>
+                    </div>
+                </div>
+
+                <div v-if="insights.participants.length > 0" class="participants">
+                    <p class="meta-label">Top participants</p>
+                    <ul class="participants-list">
+                        <li v-for="participant in insights.participants" :key="participant.login" class="participant-item">
+                            <img
+                                v-if="participant.avatarUrl"
+                                :src="participant.avatarUrl"
+                                :alt="participant.login"
+                                class="participant-avatar"
+                            />
+                            <span v-else class="participant-avatar placeholder">{{ participant.login.slice(0, 1).toUpperCase() }}</span>
+                            <a
+                                v-if="participant.htmlUrl"
+                                :href="participant.htmlUrl"
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                class="participant-link"
+                            >
+                                {{ participant.login }}
+                            </a>
+                            <span v-else class="participant-link">{{ participant.login }}</span>
+                            <span class="branch-sha">{{ participant.contributions ?? 0 }} commits</span>
+                        </li>
+                    </ul>
                 </div>
             </section>
 
@@ -122,7 +499,7 @@ function goToPr(id: number) {
 
         <article v-else class="panel not-found">
             <h1 class="title">Repository not found</h1>
-            <p class="subtitle">Check the URL or return to the repositories page.</p>
+            <p class="subtitle">{{ loadError || "Check the URL or return to the repositories page." }}</p>
             <RouterLink to="/repos" class="back-link inline">Go to repositories</RouterLink>
         </article>
     </section>
@@ -189,6 +566,26 @@ function goToPr(id: number) {
     padding: 18px;
     display: grid;
     gap: 18px;
+}
+
+.alert {
+    border-radius: 12px;
+    border: 1px solid;
+    padding: 10px 12px;
+    font-size: 0.9rem;
+}
+
+.alert.error {
+    border-color: #f4c1c1;
+    background: #fff1f1;
+    color: #8f1f1f;
+}
+
+.state-panel {
+    justify-items: center;
+    text-align: center;
+    min-height: 180px;
+    align-content: center;
 }
 
 .hero {
@@ -280,6 +677,10 @@ function goToPr(id: number) {
     border-right: none;
 }
 
+.meta-item:nth-child(3n) {
+    border-right: none;
+}
+
 .meta-label {
     margin: 0;
     color: var(--ink-soft);
@@ -304,6 +705,133 @@ function goToPr(id: number) {
     border-radius: 12px;
     background: #f9fcff;
     padding: 16px;
+}
+
+.branches-panel {
+    border: 1px dashed #bfd7ea;
+    border-radius: 12px;
+    background: #f9fcff;
+    padding: 16px;
+}
+
+.insights-panel {
+    border: 1px dashed #bfd7ea;
+    border-radius: 12px;
+    background: #f9fcff;
+    padding: 16px;
+}
+
+.insights-grid {
+    margin-top: 12px;
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.insight-card {
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: #fff;
+    padding: 10px;
+}
+
+.insight-label {
+    margin: 0;
+    color: var(--ink-soft);
+    font-size: 0.74rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+
+.insight-value {
+    margin: 8px 0 0;
+    color: var(--ink-strong);
+    font-size: 1.1rem;
+    font-weight: 800;
+}
+
+.insights-meta {
+    margin-top: 12px;
+}
+
+.topics {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.participants {
+    margin-top: 12px;
+}
+
+.participants-list {
+    margin: 8px 0 0;
+    padding: 0;
+    list-style: none;
+    display: grid;
+    gap: 8px;
+}
+
+.participant-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: #fff;
+    padding: 8px 10px;
+}
+
+.participant-avatar {
+    width: 24px;
+    height: 24px;
+    border-radius: 999px;
+    object-fit: cover;
+}
+
+.participant-avatar.placeholder {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: #d7e8fb;
+    color: #1d3552;
+    font-size: 0.72rem;
+    font-weight: 700;
+}
+
+.participant-link {
+    color: #17608a;
+    text-decoration: none;
+    font-weight: 600;
+}
+
+.participant-link:hover {
+    text-decoration: underline;
+}
+
+.branches-list {
+    margin: 12px 0 0;
+    padding: 0;
+    list-style: none;
+    display: grid;
+    gap: 8px;
+}
+
+.branch-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 8px 10px;
+    background: #fff;
+    flex-wrap: wrap;
+}
+
+.branch-sha {
+    color: var(--ink-soft);
+    font-size: 0.82rem;
 }
 
 .section-title {
@@ -423,6 +951,25 @@ function goToPr(id: number) {
     padding: 18px 12px;
 }
 
+.repo-link {
+    color: #17608a;
+    text-decoration: none;
+    font-weight: 600;
+}
+
+.repo-link:hover {
+    text-decoration: underline;
+}
+
+.loader {
+    width: 30px;
+    height: 30px;
+    border-radius: 999px;
+    border: 3px solid #dbe5f0;
+    border-top-color: var(--accent);
+    animation: spin 0.8s linear infinite;
+}
+
 .not-found {
     justify-items: start;
 }
@@ -439,6 +986,10 @@ function goToPr(id: number) {
 
     .meta-grid {
         grid-template-columns: 1fr;
+    }
+
+    .insights-grid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
     .meta-item {
@@ -505,6 +1056,12 @@ function goToPr(id: number) {
         display: block;
         content: none;
         text-align: left;
+    }
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
     }
 }
 </style>

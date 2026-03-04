@@ -2,6 +2,7 @@
 
 namespace App\Controller;
 
+use App\Entity\User;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\Routing\Attribute\Route;
@@ -13,18 +14,21 @@ class MeController extends AbstractController
     {
         $user = $this->getUser();
 
-        if (!$user) {
+        if (!$user instanceof User) {
             return new JsonResponse(['authenticated' => false], 401);
         }
 
+        $githubAppInstalled = $user->getGithubInstallations()->count() > 0;
+
         return new JsonResponse([
             'authenticated' => true,
+            'githubAppInstalled' => $githubAppInstalled,
             'user' => [
-                'id' => method_exists($user, 'getId') ? $user->getId() : null,
-                'githubId' => method_exists($user, 'getGithubId') ? $user->getGithubId() : null,
-                'username' => method_exists($user, 'getGithubUsername') ? $user->getGithubUsername() : null,
-                'email' => method_exists($user, 'getEmail') ? $user->getEmail() : null,
-                'roles' => method_exists($user, 'getRoles') ? $user->getRoles() : [],
+                'id' => $user->getId(),
+                'githubId' => $user->getGithubId(),
+                'username' => $user->getGithubUsername(),
+                'email' => $user->getEmail(),
+                'roles' => $user->getRoles(),
             ]
         ]);
     }
