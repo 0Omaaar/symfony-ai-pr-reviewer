@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
-import { useRouter } from "vue-router";
+import { computed, onMounted, ref } from "vue";
+import { useRoute, useRouter } from "vue-router";
 
 type MeResponse = {
+  authenticated?: boolean;
+  githubAppInstalled?: boolean;
   id?: number | string;
   email?: string;
   username?: string;
@@ -13,6 +15,7 @@ type MeResponse = {
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 const router = useRouter();
+const route = useRoute();
 const me = ref<MeResponse | null>(null);
 const meStatus = ref("Not checked");
 const meError = ref("");
@@ -23,6 +26,7 @@ function loginWithGithub() {
 }
 
 function installGithubApp() {
+  if (isInstallDisabled.value) return;
   window.location.href = `${apiBaseUrl}/connect/github/app/install`;
 }
 
@@ -82,6 +86,18 @@ async function logout() {
 onMounted(() => {
   void fetchCurrentUser();
 });
+
+function isDashboardRoute() {
+  return route.name === "dashboard";
+}
+
+function isRepositoriesRoute() {
+  return route.name === "repos" || route.name === "repo-details" || route.name === "pr-details";
+}
+
+const isInstallDisabled = computed(() => {
+  return Boolean(me.value?.authenticated) && Boolean(me.value?.githubAppInstalled);
+});
 </script>
 
 <template>
@@ -93,28 +109,43 @@ onMounted(() => {
             <path d="M12 2C10.9 2 10 2.9 10 4V5C10 5.55 9.55 6 9 6S8 5.55 8 5V4C8 1.79 9.79 0 12 0S16 1.79 16 4V5C16 5.55 15.55 6 15 6S14 5.55 14 5V4C14 2.9 13.1 2 12 2ZM12 22C10.9 22 10 21.1 10 20V19C10 18.45 9.55 18 9 18S8 18.45 8 19V20C8 22.21 9.79 24 12 24S16 22.21 16 20V19C16 18.45 15.55 18 15 18S14 18.45 14 19V20C14 21.1 13.1 22 12 22ZM2 12C2 10.9 2.9 10 4 10H5C5.55 10 6 9.55 6 9S5.55 8 5 8H4C1.79 8 0 9.79 0 12S1.79 16 4 16H5C5.55 16 6 15.55 6 15S5.55 14 5 14H4C2.9 14 2 13.1 2 12ZM22 12C22 10.9 21.1 10 20 10H19C18.45 10 18 9.55 18 9S18.45 8 19 8H20C22.21 8 24 9.79 24 12S22.21 16 20 16H19C18.45 16 18 15.55 18 15S18.45 14 19 14H20C21.1 14 22 13.1 22 12Z"/>
           </svg>
         </div>
-        <h2 class="logo">AI PMR Reviewer</h2>
+        <div class="brand-copy">
+          <h2 class="logo">AI PMR Reviewer</h2>
+          <p class="brand-subtitle">Code review workspace</p>
+        </div>
       </div>
 
       <nav class="nav">
-        <RouterLink to="/" class="nav-link">
-          <svg class="nav-icon" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/>
-          </svg>
+        <p class="nav-title">Navigation</p>
+        <RouterLink to="/" class="nav-link" :class="{ 'router-link-active': isDashboardRoute() }">
+          <span class="nav-icon-wrap">
+            <svg class="nav-icon" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/>
+            </svg>
+          </span>
           <span class="nav-label">Dashboard</span>
         </RouterLink>
-        <RouterLink to="/repos" class="nav-link">
-          <svg class="nav-icon" viewBox="0 0 24 24" fill="currentColor">
-            <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
-          </svg>
+        <RouterLink to="/repos" class="nav-link" :class="{ 'router-link-active': isRepositoriesRoute() }">
+          <span class="nav-icon-wrap">
+            <svg class="nav-icon" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2zm-2 15l-5-5 1.41-1.41L10 14.17l7.59-7.59L19 8l-9 9z"/>
+            </svg>
+          </span>
           <span class="nav-label">Repositories</span>
         </RouterLink>
       </nav>
 
       <section class="auth-panel" aria-label="Authentication">
-        <button v-if="me" class="install-app-button" @click="installGithubApp">
+        <p class="auth-caption">{{ me ? "Connected with GitHub" : "Session unavailable" }}</p>
+        <button
+          v-if="me"
+          class="install-app-button"
+          :class="{ 'is-disabled': isInstallDisabled }"
+          :disabled="isInstallDisabled"
+          @click="installGithubApp"
+        >
           <span class="install-icon" aria-hidden="true">⬢</span>
-          <span>Install GitHub App</span>
+          <span>{{ isInstallDisabled ? "GitHub App Installed" : "Install GitHub App" }}</span>
         </button>
         <button class="logout-button" @click="logout">
           <span class="logout-icon" aria-hidden="true">↩</span>
@@ -133,56 +164,77 @@ onMounted(() => {
 
 <style scoped>
 .layout {
-  --bg: #f0f4f8;
   --surface: #ffffff;
-  --surface-soft: #f8fbff;
-  --ink-strong: #0f172a;
-  --ink-body: #334155;
-  --ink-soft: #64748b;
-  --line: #dbe5f0;
-  --line-strong: #c5d4e6;
-  --accent: #0ea5e9;
-  --accent-soft: #e0f2fe;
-  --shadow: 0 20px 50px -12px rgba(15, 23, 42, 0.25);
-  --shadow-hover: 0 25px 60px -12px rgba(15, 23, 42, 0.35);
+  --surface-soft: #f3f6fb;
+  --ink-strong: #111827;
+  --ink-body: #344256;
+  --ink-soft: #67778f;
+  --line: #d3deed;
+  --line-strong: #b9c8dd;
+  --accent: #0d7ea4;
+  --accent-soft: #d9edf6;
+  --brand-deep: #0f1f3d;
+  --shadow: 0 24px 48px -24px rgba(15, 31, 61, 0.45);
+  --shadow-hover: 0 24px 54px -18px rgba(17, 24, 39, 0.35);
   display: grid;
-  grid-template-columns: 270px minmax(0, 1fr);
+  grid-template-columns: 280px minmax(0, 1fr);
   min-height: 100vh;
   background:
-    radial-gradient(ellipse at top left, #e0f2fe 0%, transparent 50%),
-    radial-gradient(ellipse at bottom right, #f0f9ff 0%, transparent 50%),
-    linear-gradient(135deg, #f8fafc 0%, #e2e8f0 100%);
+    radial-gradient(800px 380px at -14% -10%, #dbeafe 0%, transparent 65%),
+    radial-gradient(620px 300px at 110% 0%, #cffafe 0%, transparent 60%),
+    linear-gradient(145deg, #f7fafc 0%, #edf3fb 100%);
   color: var(--ink-body);
-  font-family: "Inter", "Segoe UI", "Helvetica Neue", sans-serif;
+  font-family: "Manrope", "Nunito Sans", "Avenir Next", "Segoe UI", sans-serif;
 }
 
 .sidebar {
   position: sticky;
-  top: 0;
-  height: 100vh;
+  top: 24px;
+  height: calc(100vh - 48px);
   display: flex;
   flex-direction: column;
-  gap: 28px;
-  padding: 16px 12px;
-  border-right: 1px solid var(--line);
+  gap: 26px;
+  padding: 18px 14px;
+  border-right: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 24px;
   background:
-    linear-gradient(180deg, #ffffff 0%, #f1f5f9 50%, #e2e8f0 100%);
+    linear-gradient(195deg, #13294e 0%, #163468 45%, #0f2a57 100%);
   box-shadow: var(--shadow);
+  overflow: hidden;
+}
+
+.sidebar::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background:
+    radial-gradient(420px 180px at -20% -15%, rgba(133, 203, 255, 0.24), transparent 70%),
+    radial-gradient(300px 180px at 120% 20%, rgba(103, 177, 255, 0.18), transparent 72%);
+  pointer-events: none;
 }
 
 .auth-panel {
-  margin-top: 200%;
+  margin-top: auto;
   display: flex;
   flex-direction: column;
   gap: 8px;
   padding: 12px;
   border-radius: 14px;
-  border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.8);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  background: rgba(255, 255, 255, 0.06);
+  backdrop-filter: blur(4px);
+}
+
+.auth-caption {
+  margin: 0 0 2px;
+  color: #dce8fb;
+  font-size: 0.79rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
 }
 
 .install-app-button {
-  border: 1px solid #bae6fd;
+  border: 1px solid #89d8f5;
   border-radius: 12px;
   padding: 10px 12px;
   display: inline-flex;
@@ -191,7 +243,7 @@ onMounted(() => {
   gap: 8px;
   width: 100%;
   background: linear-gradient(135deg, #ecfeff 0%, #e0f2fe 100%);
-  color: #075985;
+  color: #0d4667;
   font-size: 0.88rem;
   font-weight: 700;
   letter-spacing: 0.01em;
@@ -214,13 +266,24 @@ onMounted(() => {
   outline-offset: 2px;
 }
 
+.install-app-button.is-disabled,
+.install-app-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.72;
+  border-color: #c7d9e5;
+  background: linear-gradient(135deg, #eef5f9 0%, #e6eef4 100%);
+  color: #567089;
+  box-shadow: none;
+  transform: none;
+}
+
 .install-icon {
   font-size: 0.95rem;
   line-height: 1;
 }
 
 .logout-button {
-  border: 1px solid #fecaca;
+  border: 1px solid #f9c5d1;
   border-radius: 12px;
   padding: 10px 12px;
   display: inline-flex;
@@ -229,7 +292,7 @@ onMounted(() => {
   gap: 8px;
   width: 100%;
   background: linear-gradient(135deg, #fff1f2 0%, #ffe4e6 100%);
-  color: #9f1239;
+  color: #8b1f3f;
   font-size: 0.88rem;
   font-weight: 700;
   letter-spacing: 0.01em;
@@ -338,10 +401,14 @@ onMounted(() => {
   display: flex;
   align-items: center;
   gap: 16px;
-  padding: 12px 12px 10px;
+  padding: 12px;
   border-radius: 16px;
-  background: var(--surface);
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+}
+
+.brand-copy {
+  min-width: 0;
 }
 
 .brand-mark {
@@ -352,30 +419,43 @@ onMounted(() => {
   align-items: center;
   justify-content: center;
   font-size: 1.2rem;
-  color: var(--accent);
+  color: #77d8ff;
   background:
-    linear-gradient(135deg, #e0f2fe 0%, #bae6fd 100%);
-  border: 2px solid var(--accent-soft);
-  box-shadow: 0 4px 12px rgba(14, 165, 233, 0.2);
+    linear-gradient(140deg, #0b5f8a 0%, #1f86c0 100%);
+  border: 2px solid rgba(173, 224, 249, 0.7);
+  box-shadow: 0 8px 22px -10px rgba(42, 157, 220, 0.9);
 }
 
 .logo {
   margin: 0;
-  font-size: 1.25rem;
-  font-weight: 700;
+  font-size: 1.16rem;
+  font-weight: 800;
   line-height: 1.2;
   letter-spacing: -0.02em;
-  color: var(--ink-strong);
-  background: linear-gradient(135deg, var(--ink-strong) 0%, var(--accent) 100%);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
-  background-clip: text;
+  color: #f8fbff;
+}
+
+.brand-subtitle {
+  margin: 4px 0 0;
+  color: #b7cae9;
+  font-size: 0.78rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .nav {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 10px;
+}
+
+.nav-title {
+  margin: 0 6px 4px;
+  color: #b5c7e6;
+  font-size: 0.72rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
 }
 
 .nav-link {
@@ -387,13 +467,13 @@ onMounted(() => {
   border-radius: 16px;
   border: 1px solid transparent;
   text-decoration: none;
-  color: var(--ink-body);
-  font-weight: 600;
+  color: #d4e3fb;
+  font-weight: 700;
   font-size: 0.95rem;
-  transition:
-    all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: transform 0.2s ease, border-color 0.2s ease, background-color 0.2s ease, color 0.2s ease;
   position: relative;
   overflow: hidden;
+  isolation: isolate;
 }
 
 .nav-link::before {
@@ -403,7 +483,7 @@ onMounted(() => {
   left: -100%;
   width: 100%;
   height: 100%;
-  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.2), transparent);
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.18), transparent);
   transition: left 0.5s;
 }
 
@@ -412,39 +492,72 @@ onMounted(() => {
 }
 
 .nav-link:hover {
-  background: var(--accent-soft);
-  border-color: var(--accent);
-  color: var(--accent);
+  background: rgba(255, 255, 255, 0.11);
+  border-color: rgba(171, 203, 245, 0.55);
+  color: #ffffff;
   transform: translateY(-2px);
-  box-shadow: var(--shadow-hover);
+  box-shadow: 0 14px 30px -16px rgba(8, 16, 35, 0.8);
 }
 
 .nav-link.router-link-active {
-  color: var(--accent);
-  background: linear-gradient(135deg, var(--accent-soft) 0%, #bae6fd 100%);
-  border-color: var(--accent);
-  box-shadow: inset 0 0 0 1px rgba(14, 165, 233, 0.2), var(--shadow);
+  color: #061427;
+  background: linear-gradient(135deg, #d7eeff 0%, #bce0f6 100%);
+  border-color: rgba(219, 239, 255, 0.95);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.35), 0 16px 30px -22px rgba(10, 20, 39, 0.95);
+}
+
+.nav-link.router-link-active::after {
+  content: "";
+  position: absolute;
+  left: 8px;
+  top: 50%;
+  width: 5px;
+  height: 22px;
+  border-radius: 999px;
+  transform: translateY(-50%);
+  background: linear-gradient(180deg, #0c5d8a 0%, #0b7fb4 100%);
+}
+
+.nav-icon-wrap {
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+
+.nav-link:hover .nav-icon-wrap {
+  background: rgba(255, 255, 255, 0.18);
+}
+
+.nav-link.router-link-active .nav-icon-wrap {
+  background: rgba(255, 255, 255, 0.66);
+  border-color: rgba(13, 126, 164, 0.18);
 }
 
 .nav-icon {
-  width: 20px;
-  height: 20px;
+  width: 16px;
+  height: 16px;
   flex-shrink: 0;
 }
 
 .content {
-  padding: 32px;
+  padding: 24px 28px 28px;
   min-width: 0;
 }
 
 .content-shell {
-  min-height: calc(100vh - 64px);
-  border-radius: 24px;
-  background: linear-gradient(135deg, #ffffff 0%, #f8fafc 100%);
-  border: 1px solid var(--line);
+  height: calc(100vh - 48px);
+  border-radius: 26px;
+  background: linear-gradient(152deg, #ffffff 0%, #f8fbff 48%, #f1f7ff 100%);
+  border: 1px solid #ccdbef;
   box-shadow: var(--shadow);
-  padding: 24px;
+  padding: 22px;
   position: relative;
+  overflow: auto;
 }
 
 .content-shell::before {
@@ -454,8 +567,8 @@ onMounted(() => {
   left: 0;
   right: 0;
   height: 4px;
-  background: linear-gradient(90deg, var(--accent) 0%, #06b6d4 50%, #0ea5e9 100%);
-  border-radius: 24px 24px 0 0;
+  background: linear-gradient(90deg, #56b1d9 0%, #0f8ec3 50%, #12618a 100%);
+  border-radius: 26px 26px 0 0;
 }
 
 @media (max-width: 1024px) {
@@ -474,7 +587,8 @@ onMounted(() => {
     position: static;
     height: auto;
     border-right: none;
-    border-bottom: 1px solid var(--line);
+    border-bottom: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 0;
     padding: 20px 16px 16px;
     gap: 20px;
     box-shadow: none;
@@ -506,13 +620,15 @@ onMounted(() => {
   }
 
   .content {
-    padding: 20px;
+    padding: 18px;
   }
 
   .content-shell {
-    min-height: calc(100vh - 120px);
+    height: auto;
+    min-height: calc(100vh - 36px);
     border-radius: 20px;
     padding: 16px;
+    overflow: visible;
   }
 }
 </style>

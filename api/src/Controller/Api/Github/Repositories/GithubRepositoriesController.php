@@ -35,4 +35,106 @@ final class GithubRepositoriesController  extends AbstractController
             ], 500);
         }
     }
+
+    #[Route('/api/github/repositories/{id}', name: 'app_api_github_repository_details', methods: ['GET'])]
+    public function details(int $id, GithubInstallationRepositoriesService $service): JsonResponse
+    {
+        $user = $this->getUser();
+        if (!$user instanceof User) {
+            return $this->json(['ok' => false, 'error' => 'Unauthorized'], 401);
+        }
+
+        try {
+            $details = $service->fetchDetailsForUserRepository($user, $id);
+            if ($details === null) {
+                return $this->json([
+                    'ok' => false,
+                    'error' => 'Repository not found',
+                ], 404);
+            }
+
+            if (!$service->hasMeaningfulDetailsData($details)) {
+                $freshDetails = $service->refreshDetailsForUserRepository($user, $id);
+                if ($freshDetails !== null) {
+                    $details = $freshDetails;
+                }
+            }
+
+            return $this->json([
+                'ok' => true,
+                'repository' => $details['repository'] ?? null,
+                'branches' => $details['branches'] ?? [],
+                'pull_requests' => $details['pull_requests'] ?? [],
+                'insights' => $details['insights'] ?? [],
+            ]);
+        } catch (\Throwable $e) {
+            return $this->json([
+                'ok' => false,
+                'error' => 'Failed to fetch repository details',
+                'details' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    #[Route('/api/github/pull-requests/{id}', name: 'app_api_github_pull_request_details', methods: ['GET'])]
+    public function pullRequestDetails(int $id, GithubInstallationRepositoriesService $service): JsonResponse
+    {
+        $user = $this->getUser();
+        if (!$user instanceof User) {
+            return $this->json(['ok' => false, 'error' => 'Unauthorized'], 401);
+        }
+
+        try {
+            $details = $service->fetchPullRequestByIdForUser($user, $id);
+            if ($details === null) {
+                return $this->json([
+                    'ok' => false,
+                    'error' => 'Pull request not found',
+                ], 404);
+            }
+
+            return $this->json([
+                'ok' => true,
+                'repository' => $details['repository'] ?? null,
+                'pull_request' => $details['pull_request'] ?? null,
+            ]);
+        } catch (\Throwable $e) {
+            return $this->json([
+                'ok' => false,
+                'error' => 'Failed to fetch pull request details',
+                'details' => $e->getMessage(),
+            ], 500);
+        }
+    }
+
+    #[Route('/api/github/pull-requests/{id}/changes', name: 'app_api_github_pull_request_changes', methods: ['GET'])]
+    public function pullRequestChanges(int $id, GithubInstallationRepositoriesService $service): JsonResponse
+    {
+        $user = $this->getUser();
+        if (!$user instanceof User) {
+            return $this->json(['ok' => false, 'error' => 'Unauthorized'], 401);
+        }
+
+        try {
+            $changes = $service->fetchPullRequestChangesByIdForUser($user, $id);
+            if ($changes === null) {
+                return $this->json([
+                    'ok' => false,
+                    'error' => 'Pull request not found',
+                ], 404);
+            }
+
+            return $this->json([
+                'ok' => true,
+                'summary' => $changes['summary'] ?? [],
+                'files' => $changes['files'] ?? [],
+            ]);
+        } catch (\Throwable $e) {
+            return $this->json([
+                'ok' => false,
+                'error' => 'Failed to fetch pull request changes',
+                'details' => $e->getMessage(),
+            ], 500);
+        }
+    }
 }

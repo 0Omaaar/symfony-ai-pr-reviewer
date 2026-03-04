@@ -1,16 +1,255 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, onMounted, ref, watch } from "vue";
 import { RouterLink, useRoute } from "vue-router";
-import { mockPRs } from "@/mocks/prs";
-import { mockRepos } from "@/mocks/repos";
+import type { PullRequest } from "@/types/pr";
 
 const route = useRoute();
-const prId = Number(route.params.id);
+const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+const prId = computed(() => Number(route.params.id));
+const fallbackRepoId = computed(() => {
+    const queryValue = route.query.repoId;
+    const raw = Array.isArray(queryValue) ? queryValue[0] : queryValue;
+    const parsed = Number(raw);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+});
 
-const pr = computed(() => mockPRs.find((item) => item.id === prId) ?? null);
-const repo = computed(() => {
-    if (!pr.value) return null;
-    return mockRepos.find((item) => item.id === pr.value?.repoId) ?? null;
+type GithubRepositoryApiItem = {
+    id?: number;
+    full_name?: string;
+    name?: string;
+};
+
+type GithubPullRequestApiItem = {
+    id?: number;
+    repo_id?: number;
+    number?: number;
+    title?: string;
+    status?: "open" | "merged" | "closed";
+    head_sha?: string;
+    updated_at?: string;
+};
+
+type GithubPullRequestDetailsApiResponse = {
+    ok?: boolean;
+    repository?: GithubRepositoryApiItem;
+    pull_request?: GithubPullRequestApiItem;
+};
+
+type GithubPullRequestChangesApiResponse = {
+    ok?: boolean;
+    summary?: GithubPullRequestChangesSummaryApiItem;
+    files?: GithubPullRequestChangedFileApiItem[];
+};
+
+type GithubPullRequestChangesSummaryApiItem = {
+    changed_files?: number;
+    additions?: number;
+    deletions?: number;
+    commits?: number;
+    comments?: number;
+    review_comments?: number;
+};
+
+type GithubPullRequestChangedFileApiItem = {
+    filename?: string;
+    status?: string;
+    additions?: number;
+    deletions?: number;
+    changes?: number;
+    patch?: string | null;
+    previous_filename?: string | null;
+};
+
+type RepoForPrDetails = {
+    id: number;
+    provider: "github";
+    fullName: string;
+};
+
+type PullRequestChangesSummary = {
+    changedFiles: number;
+    additions: number;
+    deletions: number;
+    commits: number;
+    comments: number;
+    reviewComments: number;
+};
+
+type PullRequestChangedFile = {
+    filename: string;
+    status: string;
+    additions: number;
+    deletions: number;
+    changes: number;
+    patch: string | null;
+    previousFilename: string | null;
+};
+
+const pr = ref<PullRequest | null>(null);
+const repo = ref<RepoForPrDetails | null>(null);
+const changesSummary = ref<PullRequestChangesSummary | null>(null);
+const changedFiles = ref<PullRequestChangedFile[]>([]);
+const isLoading = ref(false);
+const loadError = ref("");
+
+function mapApiRepository(item: GithubRepositoryApiItem | undefined): RepoForPrDetails | null {
+    if (!item || typeof item.id !== "number") {
+        return null;
+    }
+
+    const fullName = typeof item.full_name === "string" && item.full_name !== "" ? item.full_name : item.name;
+    if (typeof fullName !== "string" || fullName === "") {
+        return null;
+    }
+
+    return {
+        id: item.id,
+        provider: "github",
+        fullName,
+    };
+}
+
+function mapApiPullRequest(item: GithubPullRequestApiItem | undefined, fallbackRepoId: number): PullRequest | null {
+    if (!item || typeof item.id !== "number" || typeof item.number !== "number") {
+        return null;
+    }
+
+    const status = item.status === "merged" || item.status === "closed" ? item.status : "open";
+
+    return {
+        id: item.id,
+        repoId: typeof item.repo_id === "number" ? item.repo_id : fallbackRepoId,
+        number: item.number,
+        title: typeof item.title === "string" && item.title !== "" ? item.title : "(No title)",
+        status,
+        headSha: typeof item.head_sha === "string" && item.head_sha !== "" ? item.head_sha : "N/A",
+        updatedAt: typeof item.updated_at === "string" ? item.updated_at : new Date().toISOString(),
+    };
+}
+
+function mapChangesSummary(item: GithubPullRequestChangesSummaryApiItem | undefined): PullRequestChangesSummary | null {
+    if (!item) return null;
+
+    return {
+        changedFiles: typeof item.changed_files === "number" ? item.changed_files : 0,
+        additions: typeof item.additions === "number" ? item.additions : 0,
+        deletions: typeof item.deletions === "number" ? item.deletions : 0,
+        commits: typeof item.commits === "number" ? item.commits : 0,
+        comments: typeof item.comments === "number" ? item.comments : 0,
+        reviewComments: typeof item.review_comments === "number" ? item.review_comments : 0,
+    };
+}
+
+function mapChangedFile(item: GithubPullRequestChangedFileApiItem): PullRequestChangedFile | null {
+    if (typeof item.filename !== "string" || item.filename === "") {
+        return null;
+    }
+
+    return {
+        filename: item.filename,
+        status: typeof item.status === "string" && item.status !== "" ? item.status : "modified",
+        additions: typeof item.additions === "number" ? item.additions : 0,
+        deletions: typeof item.deletions === "number" ? item.deletions : 0,
+        changes: typeof item.changes === "number" ? item.changes : 0,
+        patch: typeof item.patch === "string" ? item.patch : null,
+        previousFilename: typeof item.previous_filename === "string" ? item.previous_filename : null,
+    };
+}
+
+function fileStatusClass(status: string): string {
+    if (status === "added") return "is-merged";
+    if (status === "removed") return "is-closed";
+    return "is-open";
+}
+
+function patchLines(patch: string): string[] {
+    return patch.split("\n");
+}
+
+function diffLineClass(line: string): string {
+    if (line.startsWith("@@")) return "diff-line hunk";
+    if (line.startsWith("diff --git") || line.startsWith("index ") || line.startsWith("+++ ") || line.startsWith("--- ")) {
+        return "diff-line meta";
+    }
+    if (line.startsWith("+")) return "diff-line added";
+    if (line.startsWith("-")) return "diff-line removed";
+    return "diff-line context";
+}
+
+async function loadPullRequestDetails() {
+    if (!Number.isFinite(prId.value) || prId.value <= 0) {
+        pr.value = null;
+        repo.value = null;
+        changesSummary.value = null;
+        changedFiles.value = [];
+        loadError.value = "The URL contains an invalid pull request identifier.";
+        return;
+    }
+
+    isLoading.value = true;
+    loadError.value = "";
+
+    try {
+        const response = await fetch(`${apiBaseUrl}/api/github/pull-requests/${prId.value}`, {
+            credentials: "include",
+        });
+
+        if (response.status === 404) {
+            pr.value = null;
+            repo.value = null;
+            changesSummary.value = null;
+            changedFiles.value = [];
+            return;
+        }
+
+        if (!response.ok) {
+            throw new Error(`Failed to fetch pull request (${response.status})`);
+        }
+
+        const data = (await response.json()) as GithubPullRequestDetailsApiResponse;
+        const mappedRepo = mapApiRepository(data.repository);
+        const mappedPr = mapApiPullRequest(data.pull_request, mappedRepo?.id ?? 0);
+
+        repo.value = mappedRepo;
+        pr.value = mappedPr;
+
+        if (mappedPr) {
+            const changesResponse = await fetch(`${apiBaseUrl}/api/github/pull-requests/${prId.value}/changes`, {
+                credentials: "include",
+            });
+
+            if (changesResponse.ok) {
+                const changesData = (await changesResponse.json()) as GithubPullRequestChangesApiResponse;
+                changesSummary.value = mapChangesSummary(changesData.summary);
+                changedFiles.value = Array.isArray(changesData.files)
+                    ? changesData.files.map(mapChangedFile).filter((file): file is PullRequestChangedFile => file !== null)
+                    : [];
+            } else {
+                changesSummary.value = null;
+                changedFiles.value = [];
+                loadError.value = `Failed to fetch pull request changes (${changesResponse.status}).`;
+            }
+        } else {
+            changesSummary.value = null;
+            changedFiles.value = [];
+        }
+    } catch (error) {
+        pr.value = null;
+        repo.value = null;
+        changesSummary.value = null;
+        changedFiles.value = [];
+        loadError.value = error instanceof Error ? error.message : "Failed to load pull request.";
+    } finally {
+        isLoading.value = false;
+    }
+}
+
+onMounted(() => {
+    void loadPullRequestDetails();
+});
+
+watch(() => route.params.id, () => {
+    void loadPullRequestDetails();
 });
 
 function formatDate(iso: string | null) {
@@ -37,86 +276,82 @@ function prStatusClass(status: "open" | "merged" | "closed") {
     return "is-closed";
 }
 
-function resultClass(status: "pass" | "warn" | "fail") {
-    if (status === "pass") return "is-pass";
-    if (status === "warn") return "is-warn";
-    return "is-fail";
-}
-
-const checks = computed(() => {
-    if (!pr.value) return [];
-
-    if (pr.value.status === "merged") {
-        return [
-            { id: "lint", name: "Lint", status: "pass" as const, note: "No style issues detected" },
-            { id: "tests", name: "Unit tests", status: "pass" as const, note: "All tests are passing" },
-            { id: "security", name: "Security scan", status: "warn" as const, note: "1 dependency advisory" },
-        ];
+const notFoundTitle = computed(() => {
+    if (!Number.isFinite(prId.value) || prId.value <= 0) {
+        return "Invalid pull request id";
     }
-
-    if (pr.value.status === "closed") {
-        return [
-            { id: "lint", name: "Lint", status: "pass" as const, note: "No style issues detected" },
-            { id: "tests", name: "Unit tests", status: "fail" as const, note: "3 failing tests" },
-            { id: "security", name: "Security scan", status: "pass" as const, note: "No vulnerabilities" },
-        ];
+    if (!pr.value) {
+        return `Pull request #${prId.value} not found`;
     }
-
-    return [
-        { id: "lint", name: "Lint", status: "pass" as const, note: "No style issues detected" },
-        { id: "tests", name: "Unit tests", status: "warn" as const, note: "Test run still in progress" },
-        { id: "security", name: "Security scan", status: "pass" as const, note: "No vulnerabilities" },
-    ];
+    return "Repository not found";
 });
 
-const summary = computed(() => {
-    if (!pr.value) return null;
-
-    if (pr.value.status === "merged") {
-        return {
-            risk: "Low",
-            files: 8,
-            additions: 142,
-            deletions: 37,
-            recommendation: "Merged cleanly. Keep an eye on dependency updates flagged by security scan.",
-        };
+const notFoundMessage = computed(() => {
+    if (loadError.value !== "") {
+        return loadError.value;
     }
-
-    if (pr.value.status === "closed") {
-        return {
-            risk: "High",
-            files: 12,
-            additions: 219,
-            deletions: 121,
-            recommendation: "Address failing tests and re-open with a narrower scoped change set.",
-        };
+    if (!Number.isFinite(prId.value) || prId.value <= 0) {
+        return "The URL contains an invalid pull request identifier.";
     }
+    if (!pr.value) {
+        return "This pull request was not found in your connected repositories.";
+    }
+    return "The repository linked to this pull request is unavailable.";
+});
 
-    return {
-        risk: "Medium",
-        files: 6,
-        additions: 96,
-        deletions: 24,
-        recommendation: "Request one more reviewer for auth/session edge cases before merge.",
-    };
+const notFoundLink = computed(() => {
+    if (pr.value?.repoId) {
+        return { name: "repo-details", params: { id: pr.value.repoId } };
+    }
+    if (fallbackRepoId.value) {
+        return { name: "repo-details", params: { id: fallbackRepoId.value } };
+    }
+    return { name: "repos" };
+});
+
+const notFoundLinkLabel = computed(() => {
+    if (pr.value?.repoId || fallbackRepoId.value) {
+        return "Go to repository";
+    }
+    return "Go to repositories";
+});
+
+const backLinkTo = computed(() => {
+    if (repo.value?.id) {
+        return { name: "repo-details", params: { id: repo.value.id } };
+    }
+    if (fallbackRepoId.value) {
+        return { name: "repo-details", params: { id: fallbackRepoId.value } };
+    }
+    return { name: "repos" };
+});
+
+const backLinkLabel = computed(() => {
+    if (repo.value?.id || fallbackRepoId.value) {
+        return "Back to repository";
+    }
+    return "Back to repositories";
 });
 </script>
 
 <template>
     <section class="pr-details-view">
-        <RouterLink v-if="repo" :to="{ name: 'repo-details', params: { id: repo.id } }" class="back-link">
-            Back to repository
-        </RouterLink>
-        <RouterLink v-else to="/repos" class="back-link">Back to repositories</RouterLink>
+        <RouterLink :to="backLinkTo" class="back-link">{{ backLinkLabel }}</RouterLink>
 
-        <article v-if="pr && repo && summary" class="panel">
+        <article v-if="isLoading" class="panel loading-panel" role="status" aria-live="polite">
+            <span class="loader" aria-hidden="true"></span>
+            <h1 class="title">Loading pull request...</h1>
+            <p class="subtitle">Please wait while we fetch the latest pull request details.</p>
+        </article>
+
+        <article v-else-if="pr && repo" class="panel">
+            <div v-if="loadError" class="alert error" role="alert">{{ loadError }}</div>
+
             <header class="hero">
                 <div class="hero-copy">
                     <p class="eyebrow">Pull Request Details</p>
                     <h1 class="title">#{{ pr.number }} {{ pr.title }}</h1>
-                    <p class="subtitle">
-                        {{ repo.fullName }}
-                    </p>
+                    <p class="subtitle">{{ repo.fullName }}</p>
                 </div>
 
                 <div class="hero-badges">
@@ -131,6 +366,11 @@ const summary = computed(() => {
 
             <section class="meta-grid" aria-label="Pull request metadata">
                 <div class="meta-item">
+                    <p class="meta-label">Pull request ID</p>
+                    <p class="meta-value mono">{{ pr.id }}</p>
+                </div>
+
+                <div class="meta-item">
                     <p class="meta-label">Head SHA</p>
                     <p class="meta-value mono">{{ pr.headSha }}</p>
                 </div>
@@ -141,70 +381,76 @@ const summary = computed(() => {
                 </div>
 
                 <div class="meta-item">
-                    <p class="meta-label">Policy pack</p>
-                    <p class="meta-value mono">{{ repo.policyPack }}</p>
+                    <p class="meta-label">Repository</p>
+                    <p class="meta-value mono">{{ repo.fullName }}</p>
                 </div>
             </section>
 
-            <section class="summary-grid" aria-label="Analysis summary">
-                <article class="summary-card">
-                    <p class="meta-label">Risk</p>
-                    <p class="summary-strong">{{ summary.risk }}</p>
-                </article>
-
-                <article class="summary-card">
-                    <p class="meta-label">Files changed</p>
-                    <p class="summary-strong">{{ summary.files }}</p>
-                </article>
-
-                <article class="summary-card">
-                    <p class="meta-label">Lines added</p>
-                    <p class="summary-strong plus">+{{ summary.additions }}</p>
-                </article>
-
-                <article class="summary-card">
-                    <p class="meta-label">Lines removed</p>
-                    <p class="summary-strong minus">-{{ summary.deletions }}</p>
-                </article>
-            </section>
-
-            <section class="analysis-panel" aria-label="AI recommendation">
-                <h2 class="section-title">AI Recommendation</h2>
-                <p class="section-note">{{ summary.recommendation }}</p>
-            </section>
-
-            <section class="checks-panel" aria-label="Checks overview">
-                <h2 class="section-title">Checks</h2>
-
-                <div class="checks-table-shell">
-                    <table class="checks-table">
-                        <thead>
-                            <tr>
-                                <th>Check</th>
-                                <th>Result</th>
-                                <th>Notes</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            <tr v-for="check in checks" :key="check.id">
-                                <td data-label="Check" class="check-name">{{ check.name }}</td>
-                                <td data-label="Result">
-                                    <span class="result-pill" :class="resultClass(check.status)">
-                                        {{ check.status }}
-                                    </span>
-                                </td>
-                                <td data-label="Notes" class="check-note">{{ check.note }}</td>
-                            </tr>
-                        </tbody>
-                    </table>
+            <section v-if="changesSummary" class="changes-panel" aria-label="Pull request changes summary">
+                <h2 class="section-title">Changes Summary</h2>
+                <div class="summary-grid">
+                    <article class="summary-card">
+                        <p class="meta-label">Files changed</p>
+                        <p class="summary-strong">{{ changesSummary.changedFiles }}</p>
+                    </article>
+                    <article class="summary-card">
+                        <p class="meta-label">Lines added</p>
+                        <p class="summary-strong plus">+{{ changesSummary.additions }}</p>
+                    </article>
+                    <article class="summary-card">
+                        <p class="meta-label">Lines removed</p>
+                        <p class="summary-strong minus">-{{ changesSummary.deletions }}</p>
+                    </article>
+                    <article class="summary-card">
+                        <p class="meta-label">Commits</p>
+                        <p class="summary-strong">{{ changesSummary.commits }}</p>
+                    </article>
+                    <article class="summary-card">
+                        <p class="meta-label">Comments</p>
+                        <p class="summary-strong">{{ changesSummary.comments }}</p>
+                    </article>
+                    <article class="summary-card">
+                        <p class="meta-label">Review comments</p>
+                        <p class="summary-strong">{{ changesSummary.reviewComments }}</p>
+                    </article>
                 </div>
+            </section>
+
+            <section class="changes-panel" aria-label="Changed files and diffs">
+                <h2 class="section-title">Files & Diffs</h2>
+                <div v-if="changedFiles.length > 0" class="files-list">
+                    <article v-for="file in changedFiles" :key="file.filename" class="file-card">
+                        <header class="file-head">
+                            <p class="file-name mono">{{ file.filename }}</p>
+                            <span class="chip status-pill" :class="fileStatusClass(file.status)">
+                                {{ file.status }}
+                            </span>
+                        </header>
+
+                        <p v-if="file.previousFilename" class="file-rename">
+                            Renamed from <span class="mono">{{ file.previousFilename }}</span>
+                        </p>
+
+                        <div class="file-metrics">
+                            <span class="summary-strong plus">+{{ file.additions }}</span>
+                            <span class="summary-strong minus">-{{ file.deletions }}</span>
+                            <span class="file-total">{{ file.changes }} total</span>
+                        </div>
+
+                        <pre v-if="file.patch" class="diff-block mono"><code>
+<span v-for="(line, index) in patchLines(file.patch)" :key="`${file.filename}-${index}`" :class="diffLineClass(line)">{{ line || " " }}</span>
+</code></pre>
+                        <p v-else class="section-note">Diff not available (binary or too large).</p>
+                    </article>
+                </div>
+                <p v-else class="section-note">No changed files data available.</p>
             </section>
         </article>
 
         <article v-else class="panel not-found">
-            <h1 class="title">Pull request not found</h1>
-            <p class="subtitle">Check the URL or return to the repositories page.</p>
-            <RouterLink to="/repos" class="back-link inline">Go to repositories</RouterLink>
+            <h1 class="title">{{ notFoundTitle }}</h1>
+            <p class="subtitle">{{ notFoundMessage }}</p>
+            <RouterLink :to="notFoundLink" class="back-link inline">{{ notFoundLinkLabel }}</RouterLink>
         </article>
     </section>
 </template>
@@ -217,7 +463,6 @@ const summary = computed(() => {
     --ink-body: #334155;
     --ink-soft: #64748b;
     --line: #dbe5f0;
-    --line-strong: #c5d4e6;
     --accent-soft: #e0f2fe;
     --github-bg: #eef3ff;
     --github-ink: #304e9b;
@@ -225,10 +470,6 @@ const summary = computed(() => {
     --gitlab-ink: #a14b21;
     --ok-bg: #e8f8ee;
     --ok-ink: #21693c;
-    --warn-bg: #fff7e6;
-    --warn-ink: #8a5a00;
-    --fail-bg: #ffecec;
-    --fail-ink: #8f1f1f;
     --shadow: 0 20px 50px -12px rgba(15, 23, 42, 0.2);
     display: grid;
     gap: 14px;
@@ -263,6 +504,19 @@ const summary = computed(() => {
     padding: 18px;
     display: grid;
     gap: 18px;
+}
+
+.alert {
+    border-radius: 12px;
+    border: 1px solid;
+    padding: 10px 12px;
+    font-size: 0.9rem;
+}
+
+.alert.error {
+    border-color: #f4c1c1;
+    background: #fff1f1;
+    color: #8f1f1f;
 }
 
 .hero {
@@ -383,36 +637,7 @@ const summary = computed(() => {
     font-family: "JetBrains Mono", "Fira Code", Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
 }
 
-.summary-grid {
-    display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 10px;
-}
-
-.summary-card {
-    border: 1px solid var(--line);
-    border-radius: 12px;
-    background: #ffffff;
-    padding: 12px;
-}
-
-.summary-strong {
-    margin: 8px 0 0;
-    font-size: 1.2rem;
-    font-weight: 800;
-    color: #1d3552;
-}
-
-.summary-strong.plus {
-    color: #21693c;
-}
-
-.summary-strong.minus {
-    color: #8f1f1f;
-}
-
-.analysis-panel,
-.checks-panel {
+.changes-panel {
     border: 1px dashed #bfd7ea;
     border-radius: 12px;
     background: #f9fcff;
@@ -430,84 +655,141 @@ const summary = computed(() => {
     color: var(--ink-soft);
 }
 
-.checks-table-shell {
+.summary-grid {
     margin-top: 12px;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.summary-card {
     border: 1px solid var(--line);
     border-radius: 12px;
     background: #ffffff;
-    overflow: hidden;
-}
-
-.checks-table {
-    width: 100%;
-    border-collapse: collapse;
-    table-layout: fixed;
-}
-
-.checks-table thead th {
-    padding: 11px 12px;
-    border-bottom: 1px solid var(--line);
-    background: #f3f8ff;
-    color: var(--ink-soft);
-    text-align: left;
-    font-size: 0.72rem;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    font-weight: 700;
-}
-
-.checks-table td {
     padding: 12px;
-    border-bottom: 1px solid var(--line);
-    color: var(--ink-body);
-    vertical-align: top;
-    overflow-wrap: anywhere;
 }
 
-.checks-table tbody tr:last-child td {
-    border-bottom: none;
+.summary-strong {
+    margin: 8px 0 0;
+    font-size: 1.05rem;
+    font-weight: 800;
+    color: #1d3552;
 }
 
-.check-name {
+.summary-strong.plus {
+    color: #21693c;
+}
+
+.summary-strong.minus {
+    color: #8f1f1f;
+}
+
+.files-list {
+    margin-top: 12px;
+    display: grid;
+    gap: 12px;
+}
+
+.file-card {
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    background: #fff;
+    padding: 12px;
+}
+
+.file-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.file-name {
+    margin: 0;
     color: #1d3552;
     font-weight: 700;
+    font-size: 0.92rem;
 }
 
-.check-note {
+.file-rename {
+    margin: 8px 0 0;
     color: var(--ink-soft);
+    font-size: 0.86rem;
 }
 
-.result-pill {
-    display: inline-flex;
-    border-radius: 999px;
-    padding: 4px 10px;
-    border: 1px solid transparent;
-    font-size: 0.75rem;
+.file-metrics {
+    margin-top: 8px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+.file-total {
+    color: var(--ink-soft);
+    font-size: 0.86rem;
     font-weight: 700;
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
 }
 
-.result-pill.is-pass {
-    color: var(--ok-ink);
-    background: var(--ok-bg);
-    border-color: #c8e8d3;
+.diff-block {
+    margin: 10px 0 0;
+    padding: 10px 0;
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    background: #0f172a;
+    color: #e2e8f0;
+    font-size: 0.75rem;
+    line-height: 1.5;
+    white-space: pre;
+    overflow: auto;
 }
 
-.result-pill.is-warn {
-    color: var(--warn-ink);
-    background: var(--warn-bg);
-    border-color: #f2dfb3;
+.diff-line {
+    display: block;
+    padding: 0 10px;
 }
 
-.result-pill.is-fail {
-    color: var(--fail-ink);
-    background: var(--fail-bg);
-    border-color: #f7caca;
+.diff-line.context {
+    color: #dbe5f0;
+}
+
+.diff-line.added {
+    color: #9cf0be;
+    background: rgba(34, 197, 94, 0.18);
+}
+
+.diff-line.removed {
+    color: #ffc8c8;
+    background: rgba(239, 68, 68, 0.2);
+}
+
+.diff-line.meta {
+    color: #93c5fd;
+    background: rgba(59, 130, 246, 0.14);
+}
+
+.diff-line.hunk {
+    color: #facc15;
+    background: rgba(250, 204, 21, 0.12);
 }
 
 .not-found {
     justify-items: start;
+}
+
+.loading-panel {
+    min-height: 200px;
+    justify-items: center;
+    align-content: center;
+    text-align: center;
+}
+
+.loader {
+    width: 34px;
+    height: 34px;
+    border-radius: 999px;
+    border: 3px solid #dbe5f0;
+    border-top-color: #0ea5e9;
+    animation: spin 0.8s linear infinite;
 }
 
 @media (max-width: 980px) {
@@ -538,59 +820,6 @@ const summary = computed(() => {
     }
 }
 
-@media (max-width: 760px) {
-
-    .checks-table,
-    .checks-table tbody,
-    .checks-table tr,
-    .checks-table td {
-        display: block;
-        width: 100%;
-    }
-
-    .checks-table thead {
-        position: absolute;
-        width: 1px;
-        height: 1px;
-        margin: -1px;
-        padding: 0;
-        overflow: hidden;
-        clip: rect(0, 0, 0, 0);
-        white-space: nowrap;
-        border: 0;
-    }
-
-    .checks-table tbody {
-        display: grid;
-        gap: 10px;
-        padding: 10px;
-    }
-
-    .checks-table tbody tr {
-        border: 1px solid var(--line);
-        border-radius: 10px;
-        background: #fff;
-        padding: 10px;
-    }
-
-    .checks-table tbody td {
-        border: none;
-        padding: 8px 0;
-        display: grid;
-        grid-template-columns: 92px 1fr;
-        gap: 10px;
-    }
-
-    .checks-table tbody td::before {
-        content: attr(data-label);
-        color: var(--ink-soft);
-        font-size: 0.72rem;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: 0.06em;
-    }
-}
-
 @media (max-width: 520px) {
     .title {
         font-size: 1.45rem;
@@ -598,6 +827,12 @@ const summary = computed(() => {
 
     .summary-grid {
         grid-template-columns: 1fr;
+    }
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
     }
 }
 </style>
