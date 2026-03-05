@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
+import { clearCachedAuth, setCachedAuth } from "@/api/auth";
 
 type MeResponse = {
   authenticated?: boolean;
@@ -20,6 +21,7 @@ const me = ref<MeResponse | null>(null);
 const meStatus = ref("Not checked");
 const meError = ref("");
 const meRaw = ref("");
+const isLoggingOut = ref(false);
 
 function loginWithGithub() {
   window.location.href = `${apiBaseUrl}/connect/github`;
@@ -42,6 +44,7 @@ async function fetchCurrentUser() {
     if (!response.ok) {
       const text = await response.text();
       me.value = null;
+      setCachedAuth(false);
       meRaw.value = text;
       meStatus.value = `Unauthenticated (${response.status})`;
       return;
@@ -49,37 +52,48 @@ async function fetchCurrentUser() {
 
     const data = (await response.json()) as MeResponse;
     me.value = data;
+    setCachedAuth(Boolean(data.authenticated));
     meRaw.value = JSON.stringify(data, null, 2);
     meStatus.value = "Authenticated";
   } catch (error) {
     me.value = null;
+    setCachedAuth(false);
     meStatus.value = "Request failed";
     meError.value = error instanceof Error ? error.message : "Unknown error";
   }
 }
 
 async function logout() {
+  if (isLogoutDisabled.value) return;
+
+  isLoggingOut.value = true;
   meError.value = "";
 
+  me.value = null;
+  clearCachedAuth();
+  meRaw.value = "";
+  meStatus.value = "Logging out...";
+
+  await router.push({ name: "login", query: { logged_out: "1" } });
+
   try {
-    const response = await fetch(`${apiBaseUrl}/logout`, {
+    const response = await fetch(`${apiBaseUrl}/api/logout`, {
       method: "POST",
       credentials: "include",
-      redirect: "manual",
+      keepalive: true,
     });
 
-    const isRedirect = response.type === "opaqueredirect" || (response.status >= 300 && response.status < 400);
-    if (!response.ok && !isRedirect) {
+    if (!response.ok) {
       throw new Error(`Logout failed with status ${response.status}`);
     }
 
-    me.value = null;
-    meRaw.value = "";
     meStatus.value = "Logged out";
-    await router.push({ name: "login" });
+    await router.replace({ name: "login" });
   } catch (error) {
     meError.value = error instanceof Error ? error.message : "Logout failed";
     console.error("Logout failed:", error);
+  } finally {
+    isLoggingOut.value = false;
   }
 }
 
@@ -97,6 +111,10 @@ function isRepositoriesRoute() {
 
 const isInstallDisabled = computed(() => {
   return Boolean(me.value?.authenticated) && Boolean(me.value?.githubAppInstalled);
+});
+
+const isLogoutDisabled = computed(() => {
+  return !Boolean(me.value?.authenticated) || isLoggingOut.value;
 });
 </script>
 
@@ -147,9 +165,14 @@ const isInstallDisabled = computed(() => {
           <span class="install-icon" aria-hidden="true">⬢</span>
           <span>{{ isInstallDisabled ? "GitHub App Installed" : "Install GitHub App" }}</span>
         </button>
-        <button class="logout-button" @click="logout">
+        <button
+          class="logout-button"
+          :class="{ 'is-disabled': isLogoutDisabled }"
+          :disabled="isLogoutDisabled"
+          @click="logout"
+        >
           <span class="logout-icon" aria-hidden="true">↩</span>
-          <span>Log out</span>
+          <span>{{ isLoggingOut ? "Logging out..." : "Log out" }}</span>
         </button>
       </section>
     </aside>
@@ -313,6 +336,17 @@ const isInstallDisabled = computed(() => {
 .logout-button:focus-visible {
   outline: 3px solid #fecdd3;
   outline-offset: 2px;
+}
+
+.logout-button.is-disabled,
+.logout-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.72;
+  border-color: #d9d4d7;
+  background: linear-gradient(135deg, #f5f0f2 0%, #efe8eb 100%);
+  color: #7b6f74;
+  box-shadow: none;
+  transform: none;
 }
 
 .logout-icon {

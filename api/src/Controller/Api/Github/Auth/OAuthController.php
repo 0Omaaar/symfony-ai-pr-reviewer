@@ -14,10 +14,12 @@ use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\DependencyInjection\ParameterBag\ParameterBagInterface;
 use Symfony\Component\HttpClient\Exception\ExceptionInterface as HttpClientExceptionInterface;
 use Symfony\Contracts\HttpClient\HttpClientInterface;
+use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\RedirectResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 use Symfony\Component\Routing\Attribute\Route;
+use Symfony\Component\Security\Core\Authentication\Token\Storage\TokenStorageInterface;
 
 class OAuthController extends AbstractController
 {
@@ -40,6 +42,26 @@ class OAuthController extends AbstractController
     public function logout(): void
     {
         throw new \LogicException('Logout is handled by Symfony firewall.');
+    }
+
+    #[Route('/api/logout', name: 'app_api_logout', methods: ['POST'])]
+    public function apiLogout(Request $request, TokenStorageInterface $tokenStorage): JsonResponse
+    {
+        $sessionName = null;
+        if ($request->hasSession()) {
+            $session = $request->getSession();
+            $sessionName = $session->getName();
+            $session->invalidate();
+        }
+
+        $tokenStorage->setToken(null);
+
+        $response = $this->json(['ok' => true]);
+        if (is_string($sessionName) && $sessionName !== '') {
+            $response->headers->clearCookie($sessionName, '/');
+        }
+
+        return $response;
     }
 
     #[Route('/connect/github/app/install', name: 'connect_github_app_install', methods: ['GET'])]

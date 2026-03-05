@@ -4,20 +4,45 @@ import RepositoriesView from "@/views/RepositoriesView.vue";
 import RepositoryDetailsView from "@/views/RepositoryDetailsView.vue";
 import PrDetailsView from "@/views/PrDetailsView.vue";
 import LoginView from "@/views/auth/LoginView.vue";
-import { fetchMe } from "@/api/auth";
+import { fetchMe, getCachedAuth, setCachedAuth } from "@/api/auth";
 
 export const router = createRouter({
     history: createWebHistory(),
     routes: [
         { path: "/", name: "dashboard", component: DashboardView, meta: { requiresAuth: true }},
-        { path: "/login", name: "login", component: LoginView, meta: { guestOnly: true}},
+        { path: "/login", name: "login", component: LoginView, meta: { guestOnly: true }},
         { path: "/repos", name: "repos", component: RepositoriesView, meta: { requiresAuth: true }},
         { path: "/repos/:id", name: "repo-details", component: RepositoryDetailsView, meta: { requiresAuth: true }},
         { path: "/pr/:id", name: "pr-details", component: PrDetailsView, meta: { requiresAuth: true }},
     ]
-})
+});
 
-router.beforeEach(async (to) => {
+router.beforeEach(async (to, from) => {
+    // Fast-path for explicit logout redirect so user lands on login immediately.
+    if (to.name === "login" && to.query.logged_out === "1") {
+        return true;
+    }
+
+    const cachedAuth = getCachedAuth();
+
+    // Do not block UI when navigating inside authenticated pages.
+    if (from.meta.requiresAuth && to.meta.requiresAuth) {
+        void fetchMe().catch(() => {
+            setCachedAuth(false);
+        });
+        return true;
+    }
+
+    if (cachedAuth === true) {
+        if (to.meta.guestOnly) return { name: "dashboard" };
+        return true;
+    }
+
+    if (cachedAuth === false) {
+        if (to.meta.requiresAuth) return { name: "login" };
+        return true;
+    }
+
     try {
         const me = await fetchMe();
         const isAuthenticated = !!me?.authenticated;
@@ -30,4 +55,4 @@ router.beforeEach(async (to) => {
         if (to.meta.requiresAuth) return { name: "login" };
         return true;
     }
-})
+});
