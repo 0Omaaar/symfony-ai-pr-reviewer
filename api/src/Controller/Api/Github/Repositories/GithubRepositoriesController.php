@@ -66,6 +66,7 @@ final class GithubRepositoriesController  extends AbstractController
                 'branches' => $details['branches'] ?? [],
                 'pull_requests' => $details['pull_requests'] ?? [],
                 'insights' => $details['insights'] ?? [],
+                'latest_pr_event' => $service->fetchLatestPullRequestEventForUserRepository($user, $id),
             ]);
         } catch (\Throwable $e) {
             return $this->json([

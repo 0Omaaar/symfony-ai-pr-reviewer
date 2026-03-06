@@ -46,12 +46,13 @@ final class GithubWebhookController extends AbstractController
         }
 
         $installationId = $payload['installation']['id'] ?? null;
+        $repositoryId = $payload['repository']['id'] ?? null;
         $repositoryFullName = $payload['repository']['full_name'] ?? null;
         $pullRequestNumber = $payload['pull_request']['number'] ?? null;
         $headSha = $payload['pull_request']['head']['sha'] ?? null;
         $action = (string) ($payload['action'] ?? '');
 
-        if (!is_int($installationId) || !is_string($repositoryFullName) || !is_int($pullRequestNumber) || !is_string($headSha) || $headSha === '') {
+        if (!is_int($installationId) || !is_int($repositoryId) || !is_string($repositoryFullName) || !is_int($pullRequestNumber) || !is_string($headSha) || $headSha === '') {
             return $this->json(['ok' => false, 'error' => 'Missing required pull_request fields'], Response::HTTP_BAD_REQUEST);
         }
 
@@ -60,6 +61,7 @@ final class GithubWebhookController extends AbstractController
             'event' => $githubEvent,
             'action' => $action,
             'installation_id' => $installationId,
+            'repository_id' => $repositoryId,
             'repository' => $repositoryFullName,
             'pr_number' => $pullRequestNumber,
             'head_sha' => $headSha,
@@ -67,8 +69,10 @@ final class GithubWebhookController extends AbstractController
 
         $bus->dispatch(new ReviewPullRequestMessage(
             $installationId,
+            $repositoryId,
             $repositoryFullName,
             $pullRequestNumber,
+            $action,
             $headSha,
             $deliveryId
         ));

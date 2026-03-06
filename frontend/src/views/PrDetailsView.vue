@@ -85,12 +85,27 @@ type PullRequestChangedFile = {
     previousFilename: string | null;
 };
 
+type VisiblePullRequestChangedFile = PullRequestChangedFile & {
+    key: string;
+    previewLines: string[];
+    hasMorePatch: boolean;
+    reachedPatchRenderCap: boolean;
+};
+
 const pr = ref<PullRequest | null>(null);
 const repo = ref<RepoForPrDetails | null>(null);
 const changesSummary = ref<PullRequestChangesSummary | null>(null);
 const changedFiles = ref<PullRequestChangedFile[]>([]);
 const isLoading = ref(false);
 const loadError = ref("");
+const visibleFileCount = ref(15);
+const patchLineLimits = ref<Record<string, number>>({});
+
+const INITIAL_VISIBLE_FILES = 15;
+const FILES_INCREMENT = 15;
+const INITIAL_PATCH_LINES = 140;
+const PATCH_LINES_INCREMENT = 160;
+const MAX_PATCH_LINES_PER_FILE = 1200;
 
 function mapApiRepository(item: GithubRepositoryApiItem | undefined): RepoForPrDetails | null {
     if (!item || typeof item.id !== "number") {
@@ -162,10 +177,6 @@ function fileStatusClass(status: string): string {
     return "is-open";
 }
 
-function patchLines(patch: string): string[] {
-    return patch.split("\n");
-}
-
 function diffLineClass(line: string): string {
     if (line.startsWith("@@")) return "diff-line hunk";
     if (line.startsWith("diff --git") || line.startsWith("index ") || line.startsWith("+++ ") || line.startsWith("--- ")) {
@@ -175,6 +186,88 @@ function diffLineClass(line: string): string {
     if (line.startsWith("-")) return "diff-line removed";
     return "diff-line context";
 }
+
+function fileKey(file: PullRequestChangedFile): string {
+    return `${file.filename}::${file.previousFilename ?? ""}`;
+}
+
+function currentPatchLineLimit(file: PullRequestChangedFile): number {
+    const key = fileKey(file);
+    return patchLineLimits.value[key] ?? INITIAL_PATCH_LINES;
+}
+
+function extractPatchPreview(patch: string, maxLines: number): { lines: string[]; hasMore: boolean } {
+    const lines: string[] = [];
+    let start = 0;
+
+    for (let i = 0; i < patch.length; i++) {
+        if (patch.charCodeAt(i) !== 10) continue;
+
+        lines.push(patch.slice(start, i));
+        start = i + 1;
+        if (lines.length > maxLines) {
+            return {
+                lines: lines.slice(0, maxLines),
+                hasMore: true,
+            };
+        }
+    }
+
+    lines.push(patch.slice(start));
+
+    if (lines.length > maxLines) {
+        return {
+            lines: lines.slice(0, maxLines),
+            hasMore: true,
+        };
+    }
+
+    return {
+        lines,
+        hasMore: false,
+    };
+}
+
+function buildVisibleFile(file: PullRequestChangedFile): VisiblePullRequestChangedFile {
+    const key = fileKey(file);
+    const requestedLineCount = Math.min(currentPatchLineLimit(file), MAX_PATCH_LINES_PER_FILE);
+    let previewLines: string[] = [];
+    let hasMorePatch = false;
+
+    if (file.patch) {
+        const preview = extractPatchPreview(file.patch, requestedLineCount);
+        previewLines = preview.lines;
+        hasMorePatch = preview.hasMore;
+    }
+
+    return {
+        ...file,
+        key,
+        previewLines,
+        hasMorePatch,
+        reachedPatchRenderCap: hasMorePatch && requestedLineCount >= MAX_PATCH_LINES_PER_FILE,
+    };
+}
+
+function showMorePatchLines(file: PullRequestChangedFile) {
+    const key = fileKey(file);
+    const current = currentPatchLineLimit(file);
+    const next = Math.min(current + PATCH_LINES_INCREMENT, MAX_PATCH_LINES_PER_FILE);
+    patchLineLimits.value = {
+        ...patchLineLimits.value,
+        [key]: next,
+    };
+}
+
+function showMoreFiles() {
+    visibleFileCount.value = Math.min(changedFiles.value.length, visibleFileCount.value + FILES_INCREMENT);
+}
+
+const visibleChangedFiles = computed<VisiblePullRequestChangedFile[]>(() => {
+    return changedFiles.value.slice(0, visibleFileCount.value).map(buildVisibleFile);
+});
+
+const canShowMoreFiles = computed(() => changedFiles.value.length > visibleFileCount.value);
 
 async function loadPullRequestDetails() {
     if (!Number.isFinite(prId.value) || prId.value <= 0) {
@@ -224,6 +317,8 @@ async function loadPullRequestDetails() {
                 changedFiles.value = Array.isArray(changesData.files)
                     ? changesData.files.map(mapChangedFile).filter((file): file is PullRequestChangedFile => file !== null)
                     : [];
+                visibleFileCount.value = INITIAL_VISIBLE_FILES;
+                patchLineLimits.value = {};
             } else {
                 changesSummary.value = null;
                 changedFiles.value = [];
@@ -249,6 +344,8 @@ onMounted(() => {
 });
 
 watch(() => route.params.id, () => {
+    visibleFileCount.value = INITIAL_VISIBLE_FILES;
+    patchLineLimits.value = {};
     void loadPullRequestDetails();
 });
 
@@ -419,7 +516,7 @@ const backLinkLabel = computed(() => {
             <section class="changes-panel" aria-label="Changed files and diffs">
                 <h2 class="section-title">Files & Diffs</h2>
                 <div v-if="changedFiles.length > 0" class="files-list">
-                    <article v-for="file in changedFiles" :key="file.filename" class="file-card">
+                    <article v-for="file in visibleChangedFiles" :key="file.key" class="file-card">
                         <header class="file-head">
                             <p class="file-name mono">{{ file.filename }}</p>
                             <span class="chip status-pill" :class="fileStatusClass(file.status)">
@@ -437,11 +534,26 @@ const backLinkLabel = computed(() => {
                             <span class="file-total">{{ file.changes }} total</span>
                         </div>
 
-                        <pre v-if="file.patch" class="diff-block mono"><code>
-<span v-for="(line, index) in patchLines(file.patch)" :key="`${file.filename}-${index}`" :class="diffLineClass(line)">{{ line || " " }}</span>
+                        <template v-if="file.patch">
+                            <pre class="diff-block mono"><code>
+<span v-for="(line, index) in file.previewLines" :key="`${file.key}-${index}`" :class="diffLineClass(line)">{{ line || " " }}</span>
 </code></pre>
+                            <div v-if="file.hasMorePatch" class="diff-actions">
+                                <button v-if="!file.reachedPatchRenderCap" type="button" class="diff-btn" @click="showMorePatchLines(file)">
+                                    Load more lines
+                                </button>
+                                <p v-else class="section-note">
+                                    Diff preview limited to {{ MAX_PATCH_LINES_PER_FILE }} lines for stability.
+                                </p>
+                            </div>
+                        </template>
                         <p v-else class="section-note">Diff not available (binary or too large).</p>
                     </article>
+                    <div v-if="canShowMoreFiles" class="files-actions">
+                        <button type="button" class="diff-btn" @click="showMoreFiles">
+                            Load more files
+                        </button>
+                    </div>
                 </div>
                 <p v-else class="section-note">No changed files data available.</p>
             </section>
@@ -473,6 +585,12 @@ const backLinkLabel = computed(() => {
     --shadow: 0 20px 50px -12px rgba(15, 23, 42, 0.2);
     display: grid;
     gap: 14px;
+    min-width: 0;
+    overflow-x: hidden;
+}
+
+.pr-details-view > * {
+    min-width: 0;
 }
 
 .back-link {
@@ -504,6 +622,7 @@ const backLinkLabel = computed(() => {
     padding: 18px;
     display: grid;
     gap: 18px;
+    min-width: 0;
 }
 
 .alert {
@@ -631,6 +750,8 @@ const backLinkLabel = computed(() => {
     margin: 8px 0 0;
     color: var(--ink-strong);
     font-weight: 600;
+    overflow-wrap: anywhere;
+    word-break: break-word;
 }
 
 .mono {
@@ -642,6 +763,7 @@ const backLinkLabel = computed(() => {
     border-radius: 12px;
     background: #f9fcff;
     padding: 16px;
+    min-width: 0;
 }
 
 .section-title {
@@ -688,6 +810,7 @@ const backLinkLabel = computed(() => {
     margin-top: 12px;
     display: grid;
     gap: 12px;
+    min-width: 0;
 }
 
 .file-card {
@@ -695,6 +818,7 @@ const backLinkLabel = computed(() => {
     border-radius: 12px;
     background: #fff;
     padding: 12px;
+    min-width: 0;
 }
 
 .file-head {
@@ -702,6 +826,7 @@ const backLinkLabel = computed(() => {
     align-items: center;
     justify-content: space-between;
     gap: 10px;
+    min-width: 0;
 }
 
 .file-name {
@@ -709,6 +834,9 @@ const backLinkLabel = computed(() => {
     color: #1d3552;
     font-weight: 700;
     font-size: 0.92rem;
+    min-width: 0;
+    overflow-wrap: anywhere;
+    word-break: break-word;
 }
 
 .file-rename {
@@ -741,6 +869,36 @@ const backLinkLabel = computed(() => {
     line-height: 1.5;
     white-space: pre;
     overflow: auto;
+    max-width: 100%;
+}
+
+.diff-actions {
+    margin-top: 8px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.files-actions {
+    display: flex;
+    justify-content: center;
+}
+
+.diff-btn {
+    border: 1px solid #9fd2ea;
+    border-radius: 10px;
+    background: #e8f6ff;
+    color: #0f4f77;
+    padding: 8px 12px;
+    font-size: 0.82rem;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.diff-btn:hover {
+    background: #d7efff;
+    border-color: #84c2e2;
 }
 
 .diff-line {

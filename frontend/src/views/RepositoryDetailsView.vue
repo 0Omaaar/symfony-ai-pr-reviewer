@@ -35,6 +35,7 @@ type GithubRepositoryDetailsApiResponse = {
     branches?: GithubRepositoryBranchApiItem[];
     pull_requests?: GithubPullRequestApiItem[];
     insights?: GithubRepositoryInsightsApiItem;
+    latest_pr_event?: GithubPullRequestEventApiItem | null;
 };
 
 type GithubRepositoryBranchApiItem = {
@@ -75,6 +76,26 @@ type GithubRepositoryInsightsApiItem = {
     pushed_at?: string | null;
 };
 
+type GithubPullRequestEventApiItem = {
+    delivery_id?: string;
+    action?: string;
+    repo_id?: number;
+    pr_number?: number;
+    head_sha?: string;
+    message?: string;
+    occurred_at?: string;
+};
+
+type PullRequestEvent = {
+    deliveryId: string;
+    action: string;
+    repoId: number;
+    prNumber: number;
+    headSha: string;
+    message: string;
+    occurredAt: string | null;
+};
+
 type GithubRepositoryParticipantApiItem = {
     login?: string;
     avatar_url?: string | null;
@@ -112,6 +133,7 @@ const insights = ref<RepositoryInsights | null>(null);
 const isLoading = ref(false);
 const loadError = ref("");
 const newPrAlert = ref("");
+const lastSeenEventDeliveryId = ref<string | null>(null);
 let clearAlertTimeout: ReturnType<typeof setTimeout> | null = null;
 let pollInterval: ReturnType<typeof setInterval> | null = null;
 
@@ -202,6 +224,24 @@ function mapInsights(item: GithubRepositoryInsightsApiItem | undefined): Reposit
     };
 }
 
+function mapPullRequestEvent(item: GithubPullRequestEventApiItem | null | undefined): PullRequestEvent | null {
+    if (!item || typeof item.delivery_id !== "string" || item.delivery_id === "" || typeof item.pr_number !== "number") {
+        return null;
+    }
+
+    return {
+        deliveryId: item.delivery_id,
+        action: typeof item.action === "string" ? item.action : "unknown",
+        repoId: typeof item.repo_id === "number" ? item.repo_id : repoId.value,
+        prNumber: item.pr_number,
+        headSha: typeof item.head_sha === "string" ? item.head_sha : "N/A",
+        message: typeof item.message === "string" && item.message !== ""
+            ? item.message
+            : `Pull request #${item.pr_number} event received.`,
+        occurredAt: typeof item.occurred_at === "string" ? item.occurred_at : null,
+    };
+}
+
 function showNewPrAlert(message: string) {
     newPrAlert.value = message;
     if (clearAlertTimeout) {
@@ -261,6 +301,7 @@ async function loadRepoDetails(options: { silent?: boolean } = {}) {
 
         const data = (await res.json()) as GithubRepositoryDetailsApiResponse;
         const mapped = data.repository ? mapRepositoryDetails(data.repository) : null;
+        const latestEvent = mapPullRequestEvent(data.latest_pr_event);
         const previousPrIds = new Set(prs.value.map((pullRequest) => pullRequest.id));
         const hadPreviousData = prs.value.length > 0;
         const nextPrs = Array.isArray(data.pull_requests)
@@ -274,11 +315,20 @@ async function loadRepoDetails(options: { silent?: boolean } = {}) {
         prs.value = nextPrs;
         insights.value = mapInsights(data.insights);
 
+        let webhookAlertShown = false;
+        if (latestEvent) {
+            if (silent && latestEvent.deliveryId !== lastSeenEventDeliveryId.value) {
+                showNewPrAlert(latestEvent.message);
+                webhookAlertShown = true;
+            }
+            lastSeenEventDeliveryId.value = latestEvent.deliveryId;
+        }
+
         if (silent && hadPreviousData) {
             const newPullRequests = nextPrs.filter((pullRequest) => !previousPrIds.has(pullRequest.id));
-            if (newPullRequests.length === 1) {
+            if (!webhookAlertShown && newPullRequests.length === 1) {
                 showNewPrAlert(`New pull request #${newPullRequests[0].number} added to this repository.`);
-            } else if (newPullRequests.length > 1) {
+            } else if (!webhookAlertShown && newPullRequests.length > 1) {
                 showNewPrAlert(`${newPullRequests.length} new pull requests were added to this repository.`);
             }
         }
@@ -305,6 +355,7 @@ onMounted(() => {
 });
 
 watch(() => route.params.id, () => {
+    lastSeenEventDeliveryId.value = null;
     dismissNewPrAlert();
     void loadRepoDetails();
 });

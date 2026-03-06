@@ -75,6 +75,82 @@ final class GithubInstallationRepositoriesService
         return count($branches) > 0 || count($pullRequests) > 0 || $commits > 0 || $participants > 0;
     }
 
+    public function fetchLatestPullRequestEventForUserRepository(User $user, int $repoId): ?array
+    {
+        $userId = $user->getId();
+        if (!is_int($userId)) {
+            throw new \RuntimeException('User must be persisted before fetching repository events.');
+        }
+
+        $event = $this->cache->get(sprintf('github_user_repository_latest_event.%d.%d', $userId, $repoId), static function (ItemInterface $item): ?array {
+            $item->expiresAfter(1);
+
+            return null;
+        });
+
+        return is_array($event) ? $event : null;
+    }
+
+    public function processPullRequestWebhookEvent(
+        int $installationId,
+        int $repoId,
+        int $prNumber,
+        string $action,
+        string $deliveryId,
+        string $headSha
+    ): int {
+        $links = $this->em->getRepository(UserGithubInstallation::class)
+            ->createQueryBuilder('link')
+            ->innerJoin('link.installation', 'installation')
+            ->innerJoin('link.appUser', 'app_user')
+            ->andWhere('installation.installationId = :installationId')
+            ->setParameter('installationId', $installationId)
+            ->getQuery()
+            ->getResult();
+
+        $affectedUsers = 0;
+
+        foreach ($links as $link) {
+            if (!$link instanceof UserGithubInstallation) {
+                continue;
+            }
+
+            $userId = $link->getAppUser()?->getId();
+            if (!is_int($userId)) {
+                continue;
+            }
+
+            $affectedUsers++;
+
+            $this->cache->delete(sprintf('github_user_repositories.%d', $userId));
+            $this->cache->delete(sprintf('dashboard.payload.%d', $userId));
+            $this->cache->delete(sprintf('github_user_repository_details.%d.%d', $userId, $repoId));
+            $this->cache->delete(sprintf('github_user_repository_pull_requests.%d.%d', $userId, $repoId));
+            $this->cache->delete(sprintf('github_user_repository_branches.%d.%d', $userId, $repoId));
+            $this->cache->delete(sprintf('github_user_repository_insights.%d.%d', $userId, $repoId));
+
+            $eventPayload = [
+                'delivery_id' => $deliveryId,
+                'action' => $action,
+                'repo_id' => $repoId,
+                'pr_number' => $prNumber,
+                'head_sha' => $headSha,
+                'message' => $this->buildPullRequestEventMessage($action, $prNumber),
+                'occurred_at' => (new \DateTimeImmutable())->format(\DateTimeInterface::ATOM),
+            ];
+
+            $eventKey = sprintf('github_user_repository_latest_event.%d.%d', $userId, $repoId);
+            $this->cache->delete($eventKey);
+            $this->cache->get($eventKey, static function (ItemInterface $item) use ($eventPayload): array {
+                $item->expiresAfter(3600);
+
+                return $eventPayload;
+            });
+        }
+
+        return $affectedUsers;
+    }
+
     public function fetchPullRequestByIdForUser(User $user, int $pullRequestId): ?array
     {
         $userId = $user->getId();
@@ -665,6 +741,19 @@ final class GithubInstallationRepositoriesService
         }
 
         return $unsigned . '.' . $this->base64UrlEncode($signature);
+    }
+
+    private function buildPullRequestEventMessage(string $action, int $prNumber): string
+    {
+        return match ($action) {
+            'opened' => sprintf('Pull request #%d was opened.', $prNumber),
+            'reopened' => sprintf('Pull request #%d was reopened.', $prNumber),
+            'closed' => sprintf('Pull request #%d was closed.', $prNumber),
+            'synchronize' => sprintf('Pull request #%d received new commits.', $prNumber),
+            'ready_for_review' => sprintf('Pull request #%d is ready for review.', $prNumber),
+            'converted_to_draft' => sprintf('Pull request #%d was converted to draft.', $prNumber),
+            default => sprintf('Pull request #%d event received (%s).', $prNumber, $action !== '' ? $action : 'unknown'),
+        };
     }
 
     private function base64UrlEncode(string $data): string
