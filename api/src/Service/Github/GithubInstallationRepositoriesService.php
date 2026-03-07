@@ -98,7 +98,7 @@ final class GithubInstallationRepositoriesService
         string $action,
         string $deliveryId,
         string $headSha
-    ): int {
+    ): array {
         $links = $this->em->getRepository(UserGithubInstallation::class)
             ->createQueryBuilder('link')
             ->innerJoin('link.installation', 'installation')
@@ -108,19 +108,28 @@ final class GithubInstallationRepositoriesService
             ->getQuery()
             ->getResult();
 
-        $affectedUsers = 0;
+        $recipients = [];
+        $processedUserIds = [];
 
         foreach ($links as $link) {
             if (!$link instanceof UserGithubInstallation) {
                 continue;
             }
 
-            $userId = $link->getAppUser()?->getId();
+            $appUser = $link->getAppUser();
+            if (!$appUser instanceof User) {
+                continue;
+            }
+
+            $userId = $appUser->getId();
             if (!is_int($userId)) {
                 continue;
             }
 
-            $affectedUsers++;
+            if (isset($processedUserIds[$userId])) {
+                continue;
+            }
+            $processedUserIds[$userId] = true;
 
             $this->cache->delete(sprintf('github_user_repositories.%d', $userId));
             $this->cache->delete(sprintf('dashboard.payload.%d', $userId));
@@ -146,9 +155,15 @@ final class GithubInstallationRepositoriesService
 
                 return $eventPayload;
             });
+
+            $recipients[] = [
+                'user_id' => $userId,
+                'email' => $appUser->getEmail(),
+                'github_username' => $appUser->getGithubUsername(),
+            ];
         }
 
-        return $affectedUsers;
+        return $recipients;
     }
 
     public function fetchPullRequestByIdForUser(User $user, int $pullRequestId): ?array

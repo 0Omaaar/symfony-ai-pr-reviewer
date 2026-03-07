@@ -6,7 +6,7 @@ services:
     environment:
       APP_ENV: dev
       DATABASE_URL: "postgresql://app:!ChangeMe!@database:5432/app?serverVersion=16&charset=utf8"
-      MAILER_DSN: "smtp://mailer:1025"
+      MAILER_DSN: "smtp://elkhotriomarpro%40gmail.com:kckfozwgpcnlzxlv@smtp.gmail.com:587?encryption=tls&auth_mode=login"
       GITHUB_APP_ID: "2860467"
       GITHUB_APP_INSTALL_URL: "https://github.com/apps/symfony-ai-pr-reviewer-bot/installations/new"
       GITHUB_WEBHOOK_SECRET: "symfony-ai-pr-reviewer-bot-12345"
