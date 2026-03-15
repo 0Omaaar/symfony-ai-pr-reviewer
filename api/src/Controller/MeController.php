@@ -29,6 +29,7 @@ class MeController extends AbstractController
                 'username' => $user->getGithubUsername(),
                 'email' => $user->getEmail(),
                 'roles' => $user->getRoles(),
+                'emailNotificationsEnabled' => $user->isEmailNotificationsEnabled(),
             ]
         ]);
     }

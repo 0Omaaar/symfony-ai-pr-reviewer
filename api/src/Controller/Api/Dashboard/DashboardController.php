@@ -6,18 +6,28 @@ use App\Entity\User;
 use App\Service\Github\GithubInstallationRepositoriesService;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
+use Symfony\Component\DependencyInjection\Attribute\Autowire;
+use Symfony\Component\RateLimiter\RateLimiterFactory;
 use Symfony\Component\Routing\Attribute\Route;
 use Symfony\Contracts\Cache\CacheInterface;
 use Symfony\Contracts\Cache\ItemInterface;
 
 final class DashboardController extends AbstractController
 {
+    public function __construct(
+        #[Autowire(service: 'limiter.api_user')] private readonly RateLimiterFactory $apiUserLimiter,
+    ) {}
+
     #[Route('/api/dashboard', name: 'app_api_dashboard', methods: ['GET'])]
     public function __invoke(GithubInstallationRepositoriesService $service, CacheInterface $cache): JsonResponse
     {
         $user = $this->getUser();
         if (!$user instanceof User) {
             return $this->json(['ok' => false, 'error' => 'Unauthorized'], 401);
+        }
+
+        if (!$this->apiUserLimiter->create((string) $user->getId())->consume()->isAccepted()) {
+            return $this->json(['ok' => false, 'error' => 'Too many requests'], 429);
         }
 
         try {

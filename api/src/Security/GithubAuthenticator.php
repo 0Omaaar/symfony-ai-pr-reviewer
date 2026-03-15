@@ -68,6 +68,7 @@ class GithubAuthenticator extends OAuth2Authenticator
                     if ($user instanceof PasswordAuthenticatedUserInterface) {
                         $user->setPassword($this->passwordHasher->hashPassword($user, bin2hex(random_bytes(32))));
                     }
+                    $user->generateUnsubscribeToken();
                 }
 
                 // Refresh profile fields on every login.

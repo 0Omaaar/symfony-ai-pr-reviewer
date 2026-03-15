@@ -131,12 +131,17 @@ final class GithubInstallationRepositoriesService
             }
             $processedUserIds[$userId] = true;
 
+            if ($this->findUserRepositoryById($appUser, $repoId) === null) {
+                continue;
+            }
+
             $this->cache->delete(sprintf('github_user_repositories.%d', $userId));
             $this->cache->delete(sprintf('dashboard.payload.%d', $userId));
             $this->cache->delete(sprintf('github_user_repository_details.%d.%d', $userId, $repoId));
             $this->cache->delete(sprintf('github_user_repository_pull_requests.%d.%d', $userId, $repoId));
             $this->cache->delete(sprintf('github_user_repository_branches.%d.%d', $userId, $repoId));
             $this->cache->delete(sprintf('github_user_repository_insights.%d.%d', $userId, $repoId));
+            $this->cache->delete(sprintf('github_user_pr_id_to_repo_id.%d', $userId));
 
             $eventPayload = [
                 'delivery_id' => $deliveryId,
@@ -160,6 +165,8 @@ final class GithubInstallationRepositoriesService
                 'user_id' => $userId,
                 'email' => $appUser->getEmail(),
                 'github_username' => $appUser->getGithubUsername(),
+                'email_notifications_enabled' => $appUser->isEmailNotificationsEnabled(),
+                'unsubscribe_token' => $appUser->getUnsubscribeToken(),
             ];
         }
 
@@ -178,24 +185,20 @@ final class GithubInstallationRepositoriesService
         return $this->cache->get($cacheKey, function (ItemInterface $item) use ($user, $pullRequestId): ?array {
             $item->expiresAfter(120);
 
-            $repositories = $this->fetchForUser($user);
-            foreach ($repositories as $repository) {
-                if (!is_array($repository) || !isset($repository['id']) || !is_int($repository['id'])) {
-                    continue;
-                }
+            $map = $this->buildPrIdToRepoIdMap($user);
+            $repoId = $map[$pullRequestId] ?? null;
+            if ($repoId === null) {
+                return null;
+            }
 
-                $repoId = $repository['id'];
-                $pullRequests = $this->fetchPullRequestsForUserRepository($user, $repoId);
+            $repository = $this->findUserRepositoryById($user, $repoId);
+            if ($repository === null) {
+                return null;
+            }
 
-                foreach ($pullRequests as $pullRequest) {
-                    if (!is_array($pullRequest) || !isset($pullRequest['id'])) {
-                        continue;
-                    }
-
-                    if ((int) $pullRequest['id'] !== $pullRequestId) {
-                        continue;
-                    }
-
+            $pullRequests = $this->fetchPullRequestsForUserRepository($user, $repoId);
+            foreach ($pullRequests as $pullRequest) {
+                if (is_array($pullRequest) && isset($pullRequest['id']) && (int) $pullRequest['id'] === $pullRequestId) {
                     return [
                         'repository' => $repository,
                         'pull_request' => $pullRequest,
@@ -204,6 +207,38 @@ final class GithubInstallationRepositoriesService
             }
 
             return null;
+        });
+    }
+
+    private function buildPrIdToRepoIdMap(User $user): array
+    {
+        $userId = $user->getId();
+        if (!is_int($userId)) {
+            throw new \RuntimeException('User must be persisted before building PR index.');
+        }
+
+        $cacheKey = sprintf('github_user_pr_id_to_repo_id.%d', $userId);
+
+        return $this->cache->get($cacheKey, function (ItemInterface $item) use ($user): array {
+            $item->expiresAfter(120);
+
+            $map = [];
+            $repositories = $this->fetchForUser($user);
+            foreach ($repositories as $repository) {
+                if (!is_array($repository) || !is_int($repository['id'] ?? null)) {
+                    continue;
+                }
+
+                $repoId = $repository['id'];
+                $pullRequests = $this->fetchPullRequestsForUserRepository($user, $repoId);
+                foreach ($pullRequests as $pullRequest) {
+                    if (is_array($pullRequest) && is_int($pullRequest['id'] ?? null)) {
+                        $map[$pullRequest['id']] = $repoId;
+                    }
+                }
+            }
+
+            return $map;
         });
     }
 

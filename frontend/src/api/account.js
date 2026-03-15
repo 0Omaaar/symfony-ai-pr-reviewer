@@ -1,0 +1,31 @@
+const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+
+export async function deleteAccount() {
+    const res = await fetch(`${apiBaseUrl}/api/account`, {
+        method: "DELETE",
+        credentials: "include",
+    });
+
+    if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data?.error ?? `Request failed with status ${res.status}`);
+    }
+
+    return res.json();
+}
+
+export async function updateNotifications(enabled) {
+    const res = await fetch(`${apiBaseUrl}/api/account/notifications`, {
+        method: "PATCH",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ email_notifications_enabled: enabled }),
+    });
+
+    if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data?.error ?? `Request failed with status ${res.status}`);
+    }
+
+    return res.json();
+}

@@ -40,6 +40,12 @@ class User implements UserInterface, PasswordAuthenticatedUserInterface
     #[ORM\Column(length: 100, nullable: true)]
     private ?string $githubUsername = null;
 
+    #[ORM\Column]
+    private bool $emailNotificationsEnabled = true;
+
+    #[ORM\Column(length: 64, nullable: true, unique: true)]
+    private ?string $unsubscribeToken = null;
+
     /**
      * @var Collection<int, UserGithubInstallation>
      */
@@ -146,6 +152,39 @@ class User implements UserInterface, PasswordAuthenticatedUserInterface
     public function setGithubUsername(?string $githubUsername): static
     {
         $this->githubUsername = $githubUsername;
+
+        return $this;
+    }
+
+    public function isEmailNotificationsEnabled(): bool
+    {
+        return $this->emailNotificationsEnabled;
+    }
+
+    public function setEmailNotificationsEnabled(bool $enabled): static
+    {
+        $this->emailNotificationsEnabled = $enabled;
+
+        return $this;
+    }
+
+    public function getUnsubscribeToken(): ?string
+    {
+        return $this->unsubscribeToken;
+    }
+
+    public function setUnsubscribeToken(?string $token): static
+    {
+        $this->unsubscribeToken = $token;
+
+        return $this;
+    }
+
+    public function generateUnsubscribeToken(): static
+    {
+        if ($this->unsubscribeToken === null) {
+            $this->unsubscribeToken = bin2hex(random_bytes(32));
+        }
 
         return $this;
     }

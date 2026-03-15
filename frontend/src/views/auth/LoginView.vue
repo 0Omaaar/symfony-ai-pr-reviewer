@@ -47,74 +47,49 @@ function login() {
 </script>
 
 <style scoped>
-@import url("https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;700;800&family=Space+Grotesk:wght@600;700&display=swap");
-
 .login-page {
-  --ink: #0f172a;
-  --ink-muted: #334155;
-  --ink-soft: #64748b;
-  --panel: rgba(255, 255, 255, 0.9);
-  --line: rgba(148, 163, 184, 0.4);
-  --accent: #0f766e;
-  --accent-strong: #0b5f58;
-  --accent-soft: #ccfbf1;
   position: relative;
-  min-height: calc(100vh - 120px);
+  min-height: 100vh;
   display: grid;
   place-items: center;
   overflow: hidden;
-  border-radius: 22px;
   background:
-    radial-gradient(circle at 15% 15%, #cffafe 0%, rgba(207, 250, 254, 0.1) 45%, transparent 60%),
-    radial-gradient(circle at 90% 85%, #ffedd5 0%, rgba(255, 237, 213, 0.06) 48%, transparent 62%),
-    linear-gradient(145deg, #f8fafc 0%, #eef2ff 42%, #ecfeff 100%);
-  border: 1px solid var(--line);
-  font-family: "Manrope", "Segoe UI", sans-serif;
+    radial-gradient(circle at 10% 10%, #d0f0ff 0%, transparent 50%),
+    radial-gradient(circle at 90% 90%, #fde8d0 0%, transparent 50%),
+    linear-gradient(145deg, #f4f8ff 0%, #eef3ff 50%, #f0fffe 100%);
+  font-family: var(--font-sans);
 }
 
 .background-glow {
   position: absolute;
-  border-radius: 999px;
-  filter: blur(6px);
-  opacity: 0.55;
-  animation: drift 12s ease-in-out infinite;
+  border-radius: 50%;
+  filter: blur(50px);
+  opacity: 0.45;
+  animation: drift 14s ease-in-out infinite;
+  pointer-events: none;
 }
 
-.glow-a {
-  width: 280px;
-  height: 280px;
-  left: -80px;
-  top: -60px;
-  background: #67e8f9;
-}
-
-.glow-b {
-  width: 300px;
-  height: 300px;
-  right: -90px;
-  bottom: -70px;
-  background: #fdba74;
-  animation-delay: -4s;
-}
+.glow-a { width: 320px; height: 320px; left: -80px; top: -60px; background: #67e8f9; }
+.glow-b { width: 360px; height: 360px; right: -90px; bottom: -60px; background: #fdba74; animation-delay: -5s; }
 
 .login-card {
   position: relative;
   z-index: 1;
-  width: min(520px, calc(100% - 36px));
-  padding: 36px;
-  border-radius: 26px;
-  background: var(--panel);
-  border: 1px solid rgba(255, 255, 255, 0.8);
+  width: min(480px, calc(100% - 36px));
+  padding: 40px;
+  border-radius: 24px;
+  background: rgba(255,255,255,0.92);
+  border: 1px solid rgba(255,255,255,0.85);
   box-shadow:
-    0 24px 60px -20px rgba(15, 23, 42, 0.3),
-    inset 0 1px 0 rgba(255, 255, 255, 0.75);
-  backdrop-filter: blur(8px);
-  animation: rise 0.45s ease-out both;
+    0 2px 8px rgba(12,26,46,0.04),
+    0 24px 56px -20px rgba(12,26,46,0.22);
+  backdrop-filter: blur(12px);
+  animation: rise 0.4s ease-out both;
 }
 
 .eyebrow {
-  margin: 0 0 12px;
-  font-size: 0.78rem;
+  margin: 0 0 10px;
+  font-size: 0.72rem;
   font-weight: 800;
   letter-spacing: 0.12em;
   text-transform: uppercase;
@@ -123,23 +98,23 @@ function login() {
 
 .title {
   margin: 0;
-  color: var(--ink);
-  font-family: "Space Grotesk", "Segoe UI", sans-serif;
-  font-size: clamp(2rem, 4vw, 2.6rem);
-  line-height: 1.05;
+  color: var(--ink-strong);
+  font-size: clamp(1.8rem, 4vw, 2.4rem);
+  line-height: 1.1;
   letter-spacing: -0.03em;
+  font-weight: 800;
 }
 
 .subtitle {
-  margin: 14px 0 28px;
-  color: var(--ink-muted);
-  font-size: 1rem;
-  line-height: 1.6;
+  margin: 12px 0 28px;
+  color: var(--ink-soft);
+  font-size: 0.95rem;
+  line-height: 1.65;
 }
 
 .github-button {
   width: 100%;
-  height: 54px;
+  height: 52px;
   border: 1px solid transparent;
   border-radius: 14px;
   padding: 0 16px;
@@ -147,83 +122,56 @@ function login() {
   align-items: center;
   justify-content: center;
   gap: 10px;
-  font-size: 0.98rem;
+  font-size: 0.95rem;
   font-weight: 700;
   color: #fff;
-  background: linear-gradient(135deg, var(--accent) 0%, var(--accent-strong) 100%);
+  background: linear-gradient(135deg, #0c1e3b 0%, #1c3d6e 100%);
   cursor: pointer;
-  transition: transform 0.18s ease, box-shadow 0.18s ease, filter 0.18s ease;
-  box-shadow: 0 14px 28px -14px rgba(15, 118, 110, 0.9);
+  font-family: var(--font-sans);
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+  box-shadow: 0 8px 24px -10px rgba(12,30,59,0.65);
 }
 
 .github-button:hover:enabled {
   transform: translateY(-1px);
-  box-shadow: 0 18px 32px -16px rgba(15, 118, 110, 0.95);
+  box-shadow: 0 12px 32px -12px rgba(12,30,59,0.75);
 }
 
 .github-button:focus-visible {
-  outline: 3px solid var(--accent-soft);
+  outline: 3px solid var(--accent-mid);
   outline-offset: 2px;
 }
 
-.github-button:disabled {
-  cursor: wait;
-  filter: saturate(0.75) brightness(0.96);
-}
+.github-button:disabled { cursor: wait; opacity: 0.8; }
 
-.github-icon {
-  width: 20px;
-  height: 20px;
-}
+.github-icon { width: 20px; height: 20px; flex-shrink: 0; }
 
 .error-message {
   margin: 14px 0 0;
   color: #b91c1c;
   font-weight: 600;
+  font-size: 0.88rem;
 }
 
 .footnote {
   margin: 18px 0 0;
-  font-size: 0.88rem;
-  color: var(--ink-soft);
-  line-height: 1.45;
+  font-size: 0.84rem;
+  color: var(--ink-faint);
+  line-height: 1.5;
 }
 
 @keyframes rise {
-  from {
-    opacity: 0;
-    transform: translateY(10px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
 }
 
 @keyframes drift {
-  0%,
-  100% {
-    transform: translate(0, 0);
-  }
-  50% {
-    transform: translate(14px, -10px);
-  }
+  0%, 100% { transform: translate(0, 0); }
+  50%       { transform: translate(16px, -12px); }
 }
 
-@media (max-width: 720px) {
-  .login-page {
-    min-height: calc(100vh - 92px);
-    border-radius: 16px;
-  }
-
-  .login-card {
-    padding: 26px 20px;
-    border-radius: 20px;
-  }
-
-  .subtitle {
-    margin-bottom: 22px;
-    font-size: 0.95rem;
-  }
+@media (max-width: 600px) {
+  .login-card { padding: 28px 22px; border-radius: 20px; }
+  .subtitle { margin-bottom: 22px; font-size: 0.9rem; }
 }
 </style>

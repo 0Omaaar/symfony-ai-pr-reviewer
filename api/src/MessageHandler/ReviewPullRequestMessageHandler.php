@@ -93,11 +93,16 @@ final readonly class ReviewPullRequestMessageHandler
                 continue;
             }
 
+            if (isset($recipient['email_notifications_enabled']) && $recipient['email_notifications_enabled'] === false) {
+                continue;
+            }
+
             $githubUsername = isset($recipient['github_username']) && is_string($recipient['github_username']) && $recipient['github_username'] !== ''
                 ? $recipient['github_username']
                 : 'there';
 
-            $htmlBody = $this->buildHtmlBody($message, $githubUsername, $repoUrl);
+            $unsubscribeToken = isset($recipient['unsubscribe_token']) && is_string($recipient['unsubscribe_token']) ? $recipient['unsubscribe_token'] : null;
+            $htmlBody = $this->buildHtmlBody($message, $githubUsername, $repoUrl, $unsubscribeToken);
             $email = (new Email())
                 ->from(new Address($fromEmail, $fromName !== '' ? $fromName : 'autoPMR'))
                 ->to($toEmail)
@@ -161,7 +166,7 @@ final readonly class ReviewPullRequestMessageHandler
         return implode("\n", $lines);
     }
 
-    private function buildHtmlBody(ReviewPullRequestMessage $message, string $githubUsername, ?string $repoUrl): string
+    private function buildHtmlBody(ReviewPullRequestMessage $message, string $githubUsername, ?string $repoUrl, ?string $unsubscribeToken): string
     {
         $actionLabel = $this->formatAction($message->action);
         $safeUsername = $this->escapeHtml($githubUsername);
@@ -178,6 +183,18 @@ final readonly class ReviewPullRequestMessageHandler
                 '<a href="%s" style="display:inline-block;margin-top:18px;padding:12px 18px;background:linear-gradient(135deg,#1a73e8,#00b3ff);color:#ffffff;text-decoration:none;border-radius:10px;font-weight:600;font-size:14px;">Open Repository</a><p style="margin:14px 0 0;color:#7f8ea3;font-size:12px;line-height:1.5;">If the button does not work, copy this URL:<br><span style="word-break:break-all;color:#a8b6cb;">%s</span></p>',
                 $safeRepoUrlAttr,
                 $safeRepoUrl
+            );
+        }
+
+        $unsubscribeSection = '';
+        if ($unsubscribeToken !== null) {
+            $frontUrl = rtrim(trim((string) $this->params->get('pr_alert.front_url')), '/');
+            $unsubscribeUrl = $frontUrl !== ''
+                ? htmlspecialchars($frontUrl . '/api/unsubscribe/' . $unsubscribeToken, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8')
+                : htmlspecialchars('/unsubscribe/' . $unsubscribeToken, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+            $unsubscribeSection = sprintf(
+                '<p style="margin:12px 0 0;text-align:center;"><a href="%s" style="color:#8a97aa;font-size:11px;text-decoration:underline;">Unsubscribe from PR alerts</a></p>',
+                $unsubscribeUrl
             );
         }
 
@@ -224,6 +241,7 @@ final readonly class ReviewPullRequestMessageHandler
           <tr>
             <td style="padding:16px 28px;background:#f8fbff;border-top:1px solid #e6ecf5;color:#8a97aa;font-size:12px;">
               autoPMR • Pull Request Monitoring
+              %s
             </td>
           </tr>
         </table>
@@ -239,7 +257,8 @@ final readonly class ReviewPullRequestMessageHandler
             $safeAction,
             $safeSha,
             $safeDeliveryId,
-            $repoLinkSection
+            $repoLinkSection,
+            $unsubscribeSection
         );
     }
 
