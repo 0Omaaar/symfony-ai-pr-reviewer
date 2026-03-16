@@ -142,7 +142,6 @@ final class DashboardController extends AbstractController
             return $this->json([
                 'ok' => false,
                 'error' => 'Failed to load dashboard',
-                'details' => $e->getMessage(),
             ], 500);
         }
     }

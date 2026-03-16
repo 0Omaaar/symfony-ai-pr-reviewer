@@ -55,12 +55,12 @@ final class AccountController extends AbstractController
             }
         }
 
-        $this->em->remove($user);
-        $this->em->flush();
-
-        // Invalidate the session
+        // Invalidate the session before flush to avoid stale session if flush fails
         $session = $this->requestStack->getSession();
         $session->invalidate();
+
+        $this->em->remove($user);
+        $this->em->flush();
 
         return $this->json(['ok' => true, 'message' => 'Account and all associated data deleted.']);
     }

@@ -91,7 +91,7 @@ class OAuthController extends AbstractController
         LoggerInterface $logger
     ): Response
     {
-        $frontUrl = $_ENV['FRONT_URL'] ?? 'http://localhost:5173';
+        $frontUrl = $params->has('env(FRONT_URL)') ? (string) $params->get('env(FRONT_URL)') : 'http://localhost:5173';
         $installationId = $request->query->getInt('installation_id', 0);
         $setupStatus = 'success';
 

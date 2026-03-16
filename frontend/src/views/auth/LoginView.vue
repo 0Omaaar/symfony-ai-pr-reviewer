@@ -32,13 +32,13 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from "vue";
+import { ref, computed } from "vue";
 import { useRoute } from "vue-router";
 
 const route = useRoute();
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 const isRedirecting = ref(false);
-const error = route.query.error ? "Login failed. Please try again." : "";
+const error = computed(() => route.query.error ? "Login failed. Please try again." : "");
 
 function login() {
   isRedirecting.value = true;

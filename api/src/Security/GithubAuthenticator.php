@@ -25,7 +25,9 @@ class GithubAuthenticator extends OAuth2Authenticator
         private ClientRegistry $clientRegistry,
         private EntityManagerInterface $em,
         private UserPasswordHasherInterface $passwordHasher,
-        private RouterInterface $router
+        private RouterInterface $router,
+        #[\Symfony\Component\DependencyInjection\Attribute\Autowire(env: 'FRONT_URL')]
+        private string $frontUrl = 'http://localhost:5173',
     ) {
     }
 
@@ -86,13 +88,13 @@ class GithubAuthenticator extends OAuth2Authenticator
     public function onAuthenticationSuccess(Request $request, TokenInterface $token, string $firewallName): ?Response
     {
         // Redirect back to frontend after successful login
-        return new RedirectResponse($_ENV['FRONT_URL'] ?? 'http://localhost:5173');
+        return new RedirectResponse($this->frontUrl);
     }
 
     public function onAuthenticationFailure(Request $request, AuthenticationException $exception): ?Response
     {
         // redirect to frontend with an error
-        $url = ($_ENV['FRONT_URL'] ?? 'http://localhost:5173') . '/login?error=github_auth_failed';
+        $url = "{$this->frontUrl}/login?error=github_auth_failed";
         return new RedirectResponse($url);
     }
 

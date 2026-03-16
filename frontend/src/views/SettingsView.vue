@@ -8,6 +8,7 @@ const router = useRouter();
 
 const emailNotificationsEnabled = ref(true);
 const isLoadingNotif = ref(false);
+const isLoadingPrefs = ref(true);
 const notifSuccess = ref("");
 const notifError = ref("");
 
@@ -22,7 +23,9 @@ onMounted(async () => {
       emailNotificationsEnabled.value = me.user.emailNotificationsEnabled;
     }
   } catch {
-    // user data unavailable, keep default
+    notifError.value = "Could not load your preferences. Please refresh.";
+  } finally {
+    isLoadingPrefs.value = false;
   }
 });
 
@@ -85,7 +88,7 @@ async function confirmDeleteAccount() {
           <button
             class="toggle-switch"
             :class="{ 'is-on': emailNotificationsEnabled }"
-            :disabled="isLoadingNotif"
+            :disabled="isLoadingNotif || isLoadingPrefs"
             @click="toggleNotifications"
             :aria-pressed="emailNotificationsEnabled"
             aria-label="Toggle email notifications"
