@@ -45,7 +45,7 @@ final readonly class ReviewPullRequestMessageHandler
                 'action' => $message->action,
                 'pr_number' => $message->prNumber,
                 'head_sha' => $message->headSha,
-                'affected_users' => count($recipients),
+                'affected_users' => \count($recipients),
                 'emails_sent' => $sentCount,
             ]);
         } catch (\Throwable $exception) {
@@ -78,17 +78,13 @@ final readonly class ReviewPullRequestMessageHandler
             return 0;
         }
 
-        $subject = sprintf(
-            '[autoPMR] PR #%d %s in %s',
-            $message->prNumber,
-            $this->formatAction($message->action),
-            $message->repoFullName
-        );
-        $repoUrl = $frontUrl !== '' ? sprintf('%s/repos/%d', $frontUrl, $message->repoId) : null;
+        $actionLabel = $this->formatAction($message->action);
+        $subject = \sprintf('[autoPMR] PR #%d %s in %s', $message->prNumber, $actionLabel, $message->repoFullName);
+        $repoUrl = $frontUrl !== '' ? \sprintf('%s/repos/%d', $frontUrl, $message->repoId) : null;
 
         $sentCount = 0;
         foreach ($recipients as $recipient) {
-            $toEmail = isset($recipient['email']) && is_string($recipient['email']) ? trim($recipient['email']) : '';
+            $toEmail = isset($recipient['email']) && \is_string($recipient['email']) ? trim($recipient['email']) : '';
             if ($toEmail === '') {
                 continue;
             }
@@ -97,16 +93,18 @@ final readonly class ReviewPullRequestMessageHandler
                 continue;
             }
 
-            $githubUsername = isset($recipient['github_username']) && is_string($recipient['github_username']) && $recipient['github_username'] !== ''
+            $githubUsername = isset($recipient['github_username']) && \is_string($recipient['github_username']) && $recipient['github_username'] !== ''
                 ? $recipient['github_username']
                 : 'there';
 
-            $unsubscribeToken = isset($recipient['unsubscribe_token']) && is_string($recipient['unsubscribe_token']) ? $recipient['unsubscribe_token'] : null;
+            $unsubscribeToken = isset($recipient['unsubscribe_token']) && \is_string($recipient['unsubscribe_token']) ? $recipient['unsubscribe_token'] : null;
             $htmlBody = $this->buildHtmlBody($message, $githubUsername, $repoUrl, $unsubscribeToken);
-            $email = (new Email())
-                ->from(new Address($fromEmail, $fromName !== '' ? $fromName : 'autoPMR'))
+            $textBody = $this->buildTextBody($message, $githubUsername, $repoUrl);
+            $email = new Email();
+            $email->from(new Address($fromEmail, $fromName !== '' ? $fromName : 'autoPMR'))
                 ->to($toEmail)
                 ->subject($subject)
+                ->text($textBody)
                 ->html($htmlBody);
 
             if ($replyTo !== '') {
@@ -143,27 +141,23 @@ final readonly class ReviewPullRequestMessageHandler
 
     private function buildTextBody(ReviewPullRequestMessage $message, string $githubUsername, ?string $repoUrl): string
     {
+        $action = $this->formatAction($message->action);
         $lines = [
-            sprintf('Hello %s,', $githubUsername),
+            "Hello {$githubUsername},",
             '',
-            sprintf(
-                'A pull request event was received: PR #%d %s in %s.',
-                $message->prNumber,
-                $this->formatAction($message->action),
-                $message->repoFullName
-            ),
-            sprintf('Head SHA: %s', $message->headSha),
-            sprintf('Delivery ID: %s', $message->deliveryId),
+            \sprintf('A pull request event was received: PR #%d %s in %s.', $message->prNumber, $action, $message->repoFullName),
+            "Head SHA: {$message->headSha}",
+            "Delivery ID: {$message->deliveryId}",
         ];
 
         if ($repoUrl !== null) {
-            $lines[] = sprintf('Open repository: %s', $repoUrl);
+            $lines[] = "Open repository: {$repoUrl}";
         }
 
         $lines[] = '';
         $lines[] = 'autoPMR';
 
-        return implode("\n", $lines);
+        return \implode("\n", $lines);
     }
 
     private function buildHtmlBody(ReviewPullRequestMessage $message, string $githubUsername, ?string $repoUrl, ?string $unsubscribeToken): string
@@ -179,26 +173,19 @@ final readonly class ReviewPullRequestMessageHandler
 
         $repoLinkSection = '';
         if ($safeRepoUrl !== null && $safeRepoUrlAttr !== null) {
-            $repoLinkSection = sprintf(
-                '<a href="%s" style="display:inline-block;margin-top:18px;padding:12px 18px;background:linear-gradient(135deg,#1a73e8,#00b3ff);color:#ffffff;text-decoration:none;border-radius:10px;font-weight:600;font-size:14px;">Open Repository</a><p style="margin:14px 0 0;color:#7f8ea3;font-size:12px;line-height:1.5;">If the button does not work, copy this URL:<br><span style="word-break:break-all;color:#a8b6cb;">%s</span></p>',
-                $safeRepoUrlAttr,
-                $safeRepoUrl
-            );
+            $repoLinkSection = "<a href=\"{$safeRepoUrlAttr}\" style=\"display:inline-block;margin-top:18px;padding:12px 18px;background:linear-gradient(135deg,#1a73e8,#00b3ff);color:#ffffff;text-decoration:none;border-radius:10px;font-weight:600;font-size:14px;\">Open Repository</a><p style=\"margin:14px 0 0;color:#7f8ea3;font-size:12px;line-height:1.5;\">If the button does not work, copy this URL:<br><span style=\"word-break:break-all;color:#a8b6cb;\">{$safeRepoUrl}</span></p>";
         }
 
         $unsubscribeSection = '';
         if ($unsubscribeToken !== null) {
-            $frontUrl = rtrim(trim((string) $this->params->get('pr_alert.front_url')), '/');
+            $frontUrl = \rtrim(\trim((string) $this->params->get('pr_alert.front_url')), '/');
             $unsubscribeUrl = $frontUrl !== ''
-                ? htmlspecialchars($frontUrl . '/api/unsubscribe/' . $unsubscribeToken, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8')
-                : htmlspecialchars('/unsubscribe/' . $unsubscribeToken, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
-            $unsubscribeSection = sprintf(
-                '<p style="margin:12px 0 0;text-align:center;"><a href="%s" style="color:#8a97aa;font-size:11px;text-decoration:underline;">Unsubscribe from PR alerts</a></p>',
-                $unsubscribeUrl
-            );
+                ? \htmlspecialchars("{$frontUrl}/unsubscribe/{$unsubscribeToken}", ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8')
+                : \htmlspecialchars("/unsubscribe/{$unsubscribeToken}", ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+            $unsubscribeSection = "<p style=\"margin:12px 0 0;text-align:center;\"><a href=\"{$unsubscribeUrl}\" style=\"color:#8a97aa;font-size:11px;text-decoration:underline;\">Unsubscribe from PR alerts</a></p>";
         }
 
-        return sprintf(
+        return \sprintf(
             '<!DOCTYPE html>
 <html lang="en">
 <body style="margin:0;padding:0;background:#f3f6fb;font-family:-apple-system,BlinkMacSystemFont,\'Segoe UI\',Roboto,Helvetica,Arial,sans-serif;color:#13233a;">

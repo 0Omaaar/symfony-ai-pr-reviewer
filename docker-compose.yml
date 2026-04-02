@@ -3,10 +3,10 @@ services:
     build: ./api
     ports:
       - "8000:8000"
-    environment:
+    environment: &api_env
       APP_ENV: dev
       DATABASE_URL: "postgresql://app:!ChangeMe!@database:5432/app?serverVersion=16&charset=utf8"
-      MAILER_DSN: "smtp://elkhotriomarpro%40gmail.com:kckfozwgpcnlzxlv@smtp.gmail.com:587?encryption=tls&auth_mode=login"
+      MAILER_DSN: "smtp://mailer:1025"
       GITHUB_APP_ID: "2860467"
       GITHUB_APP_INSTALL_URL: "https://github.com/apps/symfony-ai-pr-reviewer-bot/installations/new"
       GITHUB_WEBHOOK_SECRET: "symfony-ai-pr-reviewer-bot-12345"
@@ -14,10 +14,29 @@ services:
       GITHUB_OAUTH_CLIENT_ID: "Ov23liDLvehNpHVw89EG"
       GITHUB_OAUTH_CLIENT_SECRET: "4d952dd729ee0d6352596b372b77c8849d8f1cc6"
       FRONT_URL: "http://localhost:5173"
+      PR_ALERT_FROM_EMAIL: "noreply@autopgmr.local"
+      PR_ALERT_FROM_NAME: "autoPMR"
+      PR_ALERT_REPLY_TO: ""
+      PR_ALERT_FRONT_URL: "http://localhost:5173"
     volumes:
       - ./api:/app
       - api_vendor:/app/vendor
       - ./api/secrets/symfony-ai-pr-reviewer-bot.2026-02-13.private-key.pem:/app/var/github-app.pem:ro
+    depends_on:
+      database:
+        condition: service_healthy
+      mailer:
+        condition: service_started
+
+  messenger_worker:
+    build: ./api
+    command: ["php", "bin/console", "messenger:consume", "async", "--time-limit=3600"]
+    environment: *api_env
+    volumes:
+      - ./api:/app
+      - api_vendor:/app/vendor
+      - ./api/secrets/symfony-ai-pr-reviewer-bot.2026-02-13.private-key.pem:/app/var/github-app.pem:ro
+    restart: unless-stopped
     depends_on:
       database:
         condition: service_healthy

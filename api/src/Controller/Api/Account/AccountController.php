@@ -11,12 +11,14 @@ use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\RequestStack;
 use Symfony\Component\Routing\Attribute\Route;
+use Symfony\Contracts\Cache\CacheInterface;
 
 final class AccountController extends AbstractController
 {
     public function __construct(
         private readonly EntityManagerInterface $em,
         private readonly RequestStack $requestStack,
+        private readonly CacheInterface $cache,
     ) {}
 
     #[Route('/api/account', name: 'api_account_delete', methods: ['DELETE'])]
@@ -55,12 +57,11 @@ final class AccountController extends AbstractController
             }
         }
 
-        // Invalidate the session before flush to avoid stale session if flush fails
-        $session = $this->requestStack->getSession();
-        $session->invalidate();
-
         $this->em->remove($user);
         $this->em->flush();
+
+        $session = $this->requestStack->getSession();
+        $session->invalidate();
 
         return $this->json(['ok' => true, 'message' => 'Account and all associated data deleted.']);
     }
@@ -99,6 +100,11 @@ final class AccountController extends AbstractController
             $this->em->flush();
         }
 
+        // Bust repos cache so the removed installation is no longer shown
+        if ($user->getId() !== null) {
+            $this->cache->delete(\sprintf('github_user_repositories.%d', $user->getId()));
+        }
+
         return $this->json(['ok' => true]);
     }
 
@@ -111,7 +117,7 @@ final class AccountController extends AbstractController
         }
 
         $data = json_decode($request->getContent(), true);
-        if (!is_array($data) || !isset($data['email_notifications_enabled']) || !is_bool($data['email_notifications_enabled'])) {
+        if (!\is_array($data) || !isset($data['email_notifications_enabled']) || !\is_bool($data['email_notifications_enabled'])) {
             return $this->json(['ok' => false, 'error' => 'Invalid payload. Expected {"email_notifications_enabled": true|false}'], 400);
         }
 

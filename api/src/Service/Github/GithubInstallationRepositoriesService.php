@@ -29,9 +29,12 @@ final class GithubInstallationRepositoriesService
         $cacheKey = sprintf('github_user_repositories.%d', $userId);
 
         return $this->cache->get($cacheKey, function (ItemInterface $item) use ($user): array {
-            $item->expiresAfter(120);
+            $repos = $this->fetchFreshForUser($user);
 
-            return $this->fetchFreshForUser($user);
+            // Don't cache empty results — the user may not have installations yet
+            $item->expiresAfter(empty($repos) ? 10 : 120);
+
+            return $repos;
         });
     }
 

@@ -9,11 +9,13 @@ use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\DependencyInjection\Attribute\Autowire;
 use Symfony\Component\RateLimiter\RateLimiterFactory;
 use Symfony\Component\Routing\Attribute\Route;
+use Symfony\Contracts\Cache\CacheInterface;
 
 final class GithubRepositoriesController extends AbstractController
 {
     public function __construct(
         #[Autowire(service: 'limiter.api_user')] private readonly RateLimiterFactory $apiUserLimiter,
+        private readonly CacheInterface $cache,
     ) {}
 
     private function authorizeAndLimit(): User|JsonResponse
@@ -44,14 +46,13 @@ final class GithubRepositoriesController extends AbstractController
 
             return $this->json([
                 'ok' => true,
-                'count' => count($repos),
+                'count' => \count($repos),
                 'repositories' => $repos,
             ]);
         } catch (\Throwable $e) {
             return $this->json([
                 'ok' => false,
                 'error' => 'Failed to fetch repositories',
-                'details' => $e->getMessage(),
             ], 500);
         }
     }
@@ -93,7 +94,6 @@ final class GithubRepositoriesController extends AbstractController
             return $this->json([
                 'ok' => false,
                 'error' => 'Failed to fetch repository details',
-                'details' => $e->getMessage(),
             ], 500);
         }
     }
@@ -125,7 +125,6 @@ final class GithubRepositoriesController extends AbstractController
             return $this->json([
                 'ok' => false,
                 'error' => 'Failed to fetch pull request details',
-                'details' => $e->getMessage(),
             ], 500);
         }
     }
@@ -157,8 +156,21 @@ final class GithubRepositoriesController extends AbstractController
             return $this->json([
                 'ok' => false,
                 'error' => 'Failed to fetch pull request changes',
-                'details' => $e->getMessage(),
             ], 500);
         }
+    }
+
+    #[Route('/api/github/repositories/cache/clear', name: 'app_api_github_repositories_cache_clear', methods: ['POST'])]
+    public function clearCache(): JsonResponse
+    {
+        $result = $this->authorizeAndLimit();
+        if ($result instanceof JsonResponse) {
+            return $result;
+        }
+        $user = $result;
+
+        $this->cache->delete(\sprintf('github_user_repositories.%d', $user->getId()));
+
+        return $this->json(['ok' => true]);
     }
 }

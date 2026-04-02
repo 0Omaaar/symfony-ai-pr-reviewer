@@ -37,8 +37,10 @@ security:
         - { path: ^/connect/github/app/setup, roles: PUBLIC_ACCESS }
         - { path: ^/api/logout, roles: PUBLIC_ACCESS }
         - { path: ^/api/me, roles: PUBLIC_ACCESS }
+        - { path: ^/api/ping, roles: PUBLIC_ACCESS }
         - { path: ^/unsubscribe, roles: PUBLIC_ACCESS }
         - { path: ^/webhooks, roles: PUBLIC_ACCESS }
+        - { path: ^/api, roles: IS_AUTHENTICATED_FULLY }
 
 when@test:
     security:
