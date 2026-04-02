@@ -46,6 +46,9 @@ class User implements UserInterface, PasswordAuthenticatedUserInterface
     #[ORM\Column(length: 64, nullable: true, unique: true)]
     private ?string $unsubscribeToken = null;
 
+    #[ORM\Column(type: 'json', nullable: true)]
+    private ?array $notificationPreferences = null;
+
     /**
      * @var Collection<int, UserGithubInstallation>
      */
@@ -178,6 +181,35 @@ class User implements UserInterface, PasswordAuthenticatedUserInterface
         $this->unsubscribeToken = $token;
 
         return $this;
+    }
+
+    public function getNotificationPreferences(): array
+    {
+        return \array_replace_recursive(self::defaultNotificationPreferences(), $this->notificationPreferences ?? []);
+    }
+
+    public function setNotificationPreferences(array $preferences): static
+    {
+        $this->notificationPreferences = $preferences;
+
+        return $this;
+    }
+
+    public static function defaultNotificationPreferences(): array
+    {
+        return [
+            'events' => [
+                'opened' => true,
+                'closed' => true,
+                'synchronize' => true,
+                'ready_for_review' => true,
+                'converted_to_draft' => true,
+            ],
+            'repos' => [
+                'mode' => 'all',
+                'allowed' => [],
+            ],
+        ];
     }
 
     public function generateUnsubscribeToken(): static

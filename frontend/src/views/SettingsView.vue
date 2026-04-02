@@ -2,7 +2,7 @@
 import { ref, onMounted } from "vue";
 import { useRouter } from "vue-router";
 import { fetchMe, clearCachedAuth } from "@/api/auth";
-import { deleteAccount, updateNotifications, removeInstallation } from "@/api/account";
+import { deleteAccount, updateNotifications, removeInstallation, getNotificationPreferences, updateNotificationPreferences } from "@/api/account";
 
 const router = useRouter();
 
@@ -11,6 +11,50 @@ const isLoadingNotif = ref(false);
 const isLoadingPrefs = ref(true);
 const notifSuccess = ref("");
 const notifError = ref("");
+
+// Notification preferences
+type EventPrefs = { opened: boolean; closed: boolean; synchronize: boolean; ready_for_review: boolean; converted_to_draft: boolean };
+type RepoPrefs = { mode: 'all' | 'specific'; allowed: string[] };
+type NotifPrefs = { events: EventPrefs; repos: RepoPrefs };
+
+const defaultPrefs = (): NotifPrefs => ({
+  events: { opened: true, closed: true, synchronize: true, ready_for_review: true, converted_to_draft: true },
+  repos: { mode: 'all', allowed: [] },
+});
+
+const notifPrefs = ref<NotifPrefs>(defaultPrefs());
+const isSavingPrefs = ref(false);
+const prefsSuccess = ref("");
+const prefsError = ref("");
+const newRepoInput = ref("");
+
+async function savePreferences() {
+  isSavingPrefs.value = true;
+  prefsSuccess.value = "";
+  prefsError.value = "";
+  try {
+    const result = await updateNotificationPreferences(notifPrefs.value);
+    notifPrefs.value = result.notification_preferences;
+    prefsSuccess.value = "Preferences saved.";
+  } catch (e) {
+    prefsError.value = e instanceof Error ? e.message : "Failed to save preferences.";
+  } finally {
+    isSavingPrefs.value = false;
+  }
+}
+
+function addRepo() {
+  const repo = newRepoInput.value.trim();
+  if (!repo) return;
+  if (!notifPrefs.value.repos.allowed.includes(repo)) {
+    notifPrefs.value.repos.allowed = [...notifPrefs.value.repos.allowed, repo];
+  }
+  newRepoInput.value = "";
+}
+
+function removeRepo(repo: string) {
+  notifPrefs.value.repos.allowed = notifPrefs.value.repos.allowed.filter(r => r !== repo);
+}
 
 const showDeleteConfirm = ref(false);
 const isDeletingAccount = ref(false);
@@ -24,12 +68,15 @@ const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 
 onMounted(async () => {
   try {
-    const me = await fetchMe();
+    const [me, prefsResult] = await Promise.all([fetchMe(), getNotificationPreferences()]);
     if (me?.user?.emailNotificationsEnabled !== undefined) {
       emailNotificationsEnabled.value = me.user.emailNotificationsEnabled;
     }
     if (Array.isArray(me?.installations)) {
       installations.value = me.installations as Installation[];
+    }
+    if (prefsResult?.notification_preferences) {
+      notifPrefs.value = { ...defaultPrefs(), ...prefsResult.notification_preferences };
     }
   } catch {
     notifError.value = "Could not load your preferences. Please refresh.";
@@ -121,6 +168,77 @@ async function confirmDeleteAccount() {
 
         <p v-if="notifSuccess" class="feedback success">{{ notifSuccess }}</p>
         <p v-if="notifError" class="feedback error">{{ notifError }}</p>
+      </div>
+    </section>
+
+    <!-- Notification Preferences section -->
+    <section class="settings-card">
+      <div class="card-header">
+        <span class="card-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20">
+            <path d="M3 17v2h6v-2H3zM3 5v2h10V5H3zm10 8v2h8v-2h-8zM3 11v2h8v-2H3zm10-6v2h8V5h-8zm0 8v2h8v-2h-8z"/>
+          </svg>
+        </span>
+        <div>
+          <h2 class="card-title">Notification Filters</h2>
+          <p class="card-desc">Choose which PR events and repositories trigger email alerts.</p>
+        </div>
+      </div>
+
+      <div class="card-body prefs-body">
+        <fieldset class="prefs-fieldset" :disabled="isLoadingPrefs">
+          <legend class="prefs-legend">PR Event Types</legend>
+          <div class="prefs-checks">
+            <label class="pref-check" v-for="(label, key) in { opened: 'Opened / Reopened', closed: 'Closed', synchronize: 'Code updated (push)', ready_for_review: 'Ready for review', converted_to_draft: 'Converted to draft' }" :key="key">
+              <input type="checkbox" v-model="notifPrefs.events[key as keyof typeof notifPrefs.events]" />
+              <span>{{ label }}</span>
+            </label>
+          </div>
+        </fieldset>
+
+        <fieldset class="prefs-fieldset" :disabled="isLoadingPrefs">
+          <legend class="prefs-legend">Repository Filter</legend>
+          <div class="repo-mode">
+            <label class="pref-radio">
+              <input type="radio" v-model="notifPrefs.repos.mode" value="all" />
+              <span>All repositories</span>
+            </label>
+            <label class="pref-radio">
+              <input type="radio" v-model="notifPrefs.repos.mode" value="specific" />
+              <span>Specific repositories only</span>
+            </label>
+          </div>
+
+          <div v-if="notifPrefs.repos.mode === 'specific'" class="repo-filter">
+            <div class="repo-add-row">
+              <input
+                v-model="newRepoInput"
+                class="repo-input"
+                type="text"
+                placeholder="owner/repo-name"
+                @keydown.enter.prevent="addRepo"
+              />
+              <button class="btn btn-add-repo" type="button" @click="addRepo">Add</button>
+            </div>
+            <ul v-if="notifPrefs.repos.allowed.length > 0" class="repo-allowed-list">
+              <li v-for="repo in notifPrefs.repos.allowed" :key="repo" class="repo-allowed-item">
+                <code class="repo-name">{{ repo }}</code>
+                <button class="btn-remove-repo" type="button" @click="removeRepo(repo)" aria-label="Remove repo">
+                  <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14"><path d="M19 6.41L17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+                </button>
+              </li>
+            </ul>
+            <p v-else class="repo-empty-warn">No repositories added — no notifications will fire.</p>
+          </div>
+        </fieldset>
+
+        <div class="prefs-actions">
+          <button class="btn btn-save" :disabled="isSavingPrefs || isLoadingPrefs" @click="savePreferences">
+            {{ isSavingPrefs ? "Saving…" : "Save preferences" }}
+          </button>
+        </div>
+        <p v-if="prefsSuccess" class="feedback success">{{ prefsSuccess }}</p>
+        <p v-if="prefsError" class="feedback error">{{ prefsError }}</p>
       </div>
     </section>
 
@@ -469,4 +587,148 @@ async function confirmDeleteAccount() {
 }
 
 .confirm-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+
+/* ─── Preferences ────────────────────────────────────────────── */
+.prefs-body { display: flex; flex-direction: column; gap: 20px; }
+
+.prefs-fieldset {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-inner);
+  padding: 14px 16px;
+  margin: 0;
+}
+
+.prefs-fieldset:disabled { opacity: 0.6; pointer-events: none; }
+
+.prefs-legend {
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--ink-soft);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  padding: 0 6px;
+}
+
+.prefs-checks { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+
+.pref-check, .pref-radio {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--ink-body);
+  cursor: pointer;
+}
+
+.pref-check input[type="checkbox"],
+.pref-radio input[type="radio"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--accent);
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
+.repo-mode { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+
+.repo-filter { margin-top: 14px; display: flex; flex-direction: column; gap: 10px; }
+
+.repo-add-row { display: flex; gap: 8px; }
+
+.repo-input {
+  flex: 1;
+  padding: 7px 12px;
+  font-size: 0.86rem;
+  font-family: var(--font-sans);
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-inner);
+  background: var(--surface-soft);
+  color: var(--ink-body);
+  outline: none;
+}
+
+.repo-input:focus { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent-light); }
+
+.btn-add-repo {
+  border: 1px solid var(--accent-mid);
+  background: var(--accent-light);
+  color: var(--accent-hover);
+  font-size: 0.84rem;
+  font-weight: 700;
+  padding: 7px 14px;
+  border-radius: var(--radius-inner);
+  cursor: pointer;
+  font-family: var(--font-sans);
+  white-space: nowrap;
+}
+
+.btn-add-repo:hover { background: var(--accent-mid); }
+
+.repo-allowed-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.repo-allowed-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-inner);
+  background: var(--surface-soft);
+}
+
+.repo-name {
+  font-size: 0.84rem;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  color: var(--ink-body);
+}
+
+.btn-remove-repo {
+  background: none;
+  border: none;
+  cursor: pointer;
+  color: var(--ink-faint);
+  display: flex;
+  align-items: center;
+  padding: 2px;
+  border-radius: 4px;
+}
+
+.btn-remove-repo:hover { color: #b91c1c; }
+
+.repo-empty-warn {
+  margin: 0;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: #b45309;
+}
+
+.prefs-actions { display: flex; }
+
+.btn-save {
+  background: linear-gradient(135deg, var(--accent-light) 0%, var(--accent-mid) 100%);
+  border: 1px solid var(--accent-mid);
+  color: var(--accent-hover);
+  font-size: 0.86rem;
+  font-weight: 700;
+  padding: 9px 20px;
+  border-radius: var(--radius-inner);
+  cursor: pointer;
+  font-family: var(--font-sans);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+
+.btn-save:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px -8px rgba(13,126,164,0.35);
+}
+
+.btn-save:disabled { opacity: 0.6; cursor: not-allowed; }
 </style>

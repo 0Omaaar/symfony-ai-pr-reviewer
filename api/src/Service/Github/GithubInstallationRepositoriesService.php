@@ -170,6 +170,7 @@ final class GithubInstallationRepositoriesService
                 'github_username' => $appUser->getGithubUsername(),
                 'email_notifications_enabled' => $appUser->isEmailNotificationsEnabled(),
                 'unsubscribe_token' => $appUser->getUnsubscribeToken(),
+                'notification_preferences' => $appUser->getNotificationPreferences(),
             ];
         }
 

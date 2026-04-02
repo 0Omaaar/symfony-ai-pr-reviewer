@@ -93,6 +93,13 @@ final readonly class ReviewPullRequestMessageHandler
                 continue;
             }
 
+            $prefs = isset($recipient['notification_preferences']) && \is_array($recipient['notification_preferences'])
+                ? $recipient['notification_preferences']
+                : [];
+            if (!$this->shouldSendForPreferences($prefs, $message->action, $message->repoFullName)) {
+                continue;
+            }
+
             $githubUsername = isset($recipient['github_username']) && \is_string($recipient['github_username']) && $recipient['github_username'] !== ''
                 ? $recipient['github_username']
                 : 'there';
@@ -124,6 +131,38 @@ final readonly class ReviewPullRequestMessageHandler
         }
 
         return $sentCount;
+    }
+
+    private function shouldSendForPreferences(array $prefs, string $action, string $repoFullName): bool
+    {
+        $events = isset($prefs['events']) && \is_array($prefs['events']) ? $prefs['events'] : [];
+        $eventKey = $this->mapActionToEventKey($action);
+        if ($eventKey !== null && \array_key_exists($eventKey, $events) && $events[$eventKey] === false) {
+            return false;
+        }
+
+        $repos = isset($prefs['repos']) && \is_array($prefs['repos']) ? $prefs['repos'] : [];
+        $mode = isset($repos['mode']) && \is_string($repos['mode']) ? $repos['mode'] : 'all';
+        if ($mode === 'specific') {
+            $allowed = isset($repos['allowed']) && \is_array($repos['allowed']) ? $repos['allowed'] : [];
+            if (!\in_array($repoFullName, $allowed, true)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private function mapActionToEventKey(string $action): ?string
+    {
+        return match ($action) {
+            'opened', 'reopened' => 'opened',
+            'closed' => 'closed',
+            'synchronize' => 'synchronize',
+            'ready_for_review' => 'ready_for_review',
+            'converted_to_draft' => 'converted_to_draft',
+            default => null,
+        };
     }
 
     private function formatAction(string $action): string
