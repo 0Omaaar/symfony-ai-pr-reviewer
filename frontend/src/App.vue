@@ -75,6 +75,7 @@ const isInstallDisabled = computed(() => Boolean(me.value?.authenticated) && Boo
 const isLogoutDisabled = computed(() => !Boolean(me.value?.authenticated) || isLoggingOut.value);
 
 const isAuthenticated = computed(() => Boolean(me.value?.authenticated));
+const showAppLayout = computed(() => Boolean(route.meta.requiresAuth));
 
 function isActive(names: string[]) {
   return names.includes(route.name as string);
@@ -82,7 +83,8 @@ function isActive(names: string[]) {
 </script>
 
 <template>
-  <div class="layout">
+  <RouterView v-if="!showAppLayout" />
+  <div v-else class="layout">
     <aside class="sidebar">
       <!-- Brand -->
       <div class="brand">
@@ -101,7 +103,7 @@ function isActive(names: string[]) {
       <nav class="nav" aria-label="Main navigation">
         <p class="nav-group-label">Menu</p>
 
-        <RouterLink to="/" class="nav-link" :class="{ active: isActive(['dashboard']) }">
+        <RouterLink to="/dashboard" class="nav-link" :class="{ active: isActive(['dashboard']) }">
           <span class="nav-icon">
             <svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/></svg>
           </span>

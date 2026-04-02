@@ -4,6 +4,9 @@
     <div class="background-glow glow-b" aria-hidden="true"></div>
 
     <article class="login-card">
+      <button class="back-link" @click="router.push({ name: 'landing' })">
+        ← Back to home
+      </button>
       <p class="eyebrow">Secure Access</p>
       <h1 class="title">Sign in to AutoPMR</h1>
       <p class="subtitle">
@@ -33,9 +36,10 @@
 
 <script setup lang="ts">
 import { ref, computed } from "vue";
-import { useRoute } from "vue-router";
+import { useRoute, useRouter } from "vue-router";
 
 const route = useRoute();
+const router = useRouter();
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 const isRedirecting = ref(false);
 const error = computed(() => route.query.error ? "Login failed. Please try again." : "");
@@ -86,6 +90,22 @@ function login() {
   backdrop-filter: blur(12px);
   animation: rise 0.4s ease-out both;
 }
+
+.back-link {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0 0 22px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  color: var(--ink-faint);
+  cursor: pointer;
+  font-family: var(--font-sans);
+  display: block;
+  transition: color 0.15s ease;
+}
+
+.back-link:hover { color: var(--ink-body); }
 
 .eyebrow {
   margin: 0 0 10px;

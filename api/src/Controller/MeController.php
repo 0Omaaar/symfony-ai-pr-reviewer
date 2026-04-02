@@ -15,7 +15,7 @@ class MeController extends AbstractController
         $user = $this->getUser();
 
         if (!$user instanceof User) {
-            return new JsonResponse(['authenticated' => false], 401);
+            return new JsonResponse(['authenticated' => false]);
         }
 
         $githubAppInstalled = $user->getGithubInstallations()->count() > 0;
