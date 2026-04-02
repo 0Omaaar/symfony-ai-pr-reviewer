@@ -65,6 +65,43 @@ final class AccountController extends AbstractController
         return $this->json(['ok' => true, 'message' => 'Account and all associated data deleted.']);
     }
 
+    #[Route('/api/account/installations/{installationId}', name: 'api_account_installation_remove', methods: ['DELETE'])]
+    public function removeInstallation(int $installationId): JsonResponse
+    {
+        $user = $this->getUser();
+        if (!$user instanceof User) {
+            return $this->json(['ok' => false, 'error' => 'Unauthorized'], 401);
+        }
+
+        $installation = $this->em->getRepository(GithubInstallation::class)
+            ->findOneBy(['installationId' => $installationId]);
+
+        if ($installation === null) {
+            return $this->json(['ok' => false, 'error' => 'Installation not found'], 404);
+        }
+
+        $link = $this->em->getRepository(UserGithubInstallation::class)
+            ->findOneBy(['appUser' => $user, 'installation' => $installation]);
+
+        if ($link === null) {
+            return $this->json(['ok' => false, 'error' => 'Installation not linked to your account'], 404);
+        }
+
+        $this->em->remove($link);
+        $this->em->flush();
+
+        // Remove the GithubInstallation record if no other users are linked to it
+        $remainingLinks = $this->em->getRepository(UserGithubInstallation::class)
+            ->count(['installation' => $installation]);
+
+        if ($remainingLinks === 0) {
+            $this->em->remove($installation);
+            $this->em->flush();
+        }
+
+        return $this->json(['ok' => true]);
+    }
+
     #[Route('/api/account/notifications', name: 'api_account_notifications', methods: ['PATCH'])]
     public function updateNotifications(Request $request): JsonResponse
     {

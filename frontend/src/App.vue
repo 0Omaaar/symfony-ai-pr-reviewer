@@ -6,6 +6,11 @@ import { clearCachedAuth, setCachedAuth } from "@/api/auth";
 type MeResponse = {
   authenticated?: boolean;
   githubAppInstalled?: boolean;
+  installations?: Array<{
+    installation_id?: number;
+    account_login?: string | null;
+    account_type?: string | null;
+  }>;
   user?: {
     username?: string;
     email?: string;

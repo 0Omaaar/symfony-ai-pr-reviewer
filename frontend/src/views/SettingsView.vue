@@ -2,7 +2,7 @@
 import { ref, onMounted } from "vue";
 import { useRouter } from "vue-router";
 import { fetchMe, clearCachedAuth } from "@/api/auth";
-import { deleteAccount, updateNotifications } from "@/api/account";
+import { deleteAccount, updateNotifications, removeInstallation } from "@/api/account";
 
 const router = useRouter();
 
@@ -16,11 +16,20 @@ const showDeleteConfirm = ref(false);
 const isDeletingAccount = ref(false);
 const deleteError = ref("");
 
+type Installation = { installation_id: number; account_login: string | null; account_type: string | null };
+const installations = ref<Installation[]>([]);
+const removingId = ref<number | null>(null);
+const installError = ref("");
+const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
+
 onMounted(async () => {
   try {
     const me = await fetchMe();
     if (me?.user?.emailNotificationsEnabled !== undefined) {
       emailNotificationsEnabled.value = me.user.emailNotificationsEnabled;
+    }
+    if (Array.isArray(me?.installations)) {
+      installations.value = me.installations as Installation[];
     }
   } catch {
     notifError.value = "Could not load your preferences. Please refresh.";
@@ -28,6 +37,19 @@ onMounted(async () => {
     isLoadingPrefs.value = false;
   }
 });
+
+async function handleRemoveInstallation(installationId: number) {
+  removingId.value = installationId;
+  installError.value = "";
+  try {
+    await removeInstallation(installationId);
+    installations.value = installations.value.filter(i => i.installation_id !== installationId);
+  } catch (e) {
+    installError.value = e instanceof Error ? e.message : "Failed to remove installation.";
+  } finally {
+    removingId.value = null;
+  }
+}
 
 async function toggleNotifications() {
   isLoadingNotif.value = true;
@@ -99,6 +121,49 @@ async function confirmDeleteAccount() {
 
         <p v-if="notifSuccess" class="feedback success">{{ notifSuccess }}</p>
         <p v-if="notifError" class="feedback error">{{ notifError }}</p>
+      </div>
+    </section>
+
+    <!-- GitHub App Installations section -->
+    <section class="settings-card">
+      <div class="card-header">
+        <span class="card-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="currentColor" width="20" height="20">
+            <path d="M12 .5a12 12 0 0 0-3.79 23.39c.6.1.82-.26.82-.58v-2.04c-3.34.73-4.04-1.62-4.04-1.62-.55-1.4-1.34-1.77-1.34-1.77-1.1-.76.08-.75.08-.75 1.2.08 1.84 1.25 1.84 1.25 1.08 1.85 2.83 1.32 3.52 1.01.1-.79.42-1.32.77-1.62-2.67-.3-5.47-1.34-5.47-5.94 0-1.31.47-2.39 1.24-3.24-.12-.3-.54-1.53.12-3.18 0 0 1.02-.33 3.33 1.24A11.5 11.5 0 0 1 12 6.32a11.5 11.5 0 0 1 3.03.41c2.3-1.56 3.32-1.24 3.32-1.24.66 1.65.24 2.88.12 3.18.77.85 1.24 1.93 1.24 3.24 0 4.61-2.8 5.63-5.48 5.94.43.38.82 1.12.82 2.26v3.35c0 .32.21.69.82.58A12 12 0 0 0 12 .5Z"/>
+          </svg>
+        </span>
+        <div>
+          <h2 class="card-title">GitHub App Installations</h2>
+          <p class="card-desc">Manage the GitHub accounts and organizations connected to autoPMR.</p>
+        </div>
+      </div>
+
+      <div class="card-body">
+        <ul v-if="installations.length > 0" class="install-list">
+          <li v-for="inst in installations" :key="inst.installation_id" class="install-item">
+            <div class="install-info">
+              <span class="install-name">{{ inst.account_login ?? "Unknown account" }}</span>
+              <span class="install-type">{{ inst.account_type ?? "Unknown type" }}</span>
+            </div>
+            <button
+              class="btn btn-remove"
+              :disabled="removingId === inst.installation_id"
+              @click="handleRemoveInstallation(inst.installation_id)"
+            >
+              {{ removingId === inst.installation_id ? "Removing…" : "Remove" }}
+            </button>
+          </li>
+        </ul>
+        <p v-else class="install-empty">No GitHub App installations connected yet.</p>
+
+        <p v-if="installError" class="feedback error">{{ installError }}</p>
+
+        <a :href="`${apiBaseUrl}/connect/github/app/install`" class="btn btn-install">
+          <svg viewBox="0 0 24 24" fill="currentColor" width="14" height="14" aria-hidden="true">
+            <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z"/>
+          </svg>
+          Install GitHub App
+        </a>
       </div>
     </section>
 
@@ -310,6 +375,88 @@ async function confirmDeleteAccount() {
 .btn-cancel:hover:not(:disabled) {
   background: var(--surface-raised);
   transform: translateY(-1px);
+}
+
+/* ─── Installations ──────────────────────────────────────────── */
+.install-list {
+  list-style: none;
+  margin: 0 0 14px;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.install-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-inner);
+  background: var(--surface-soft);
+}
+
+.install-info { display: flex; flex-direction: column; gap: 2px; }
+
+.install-name {
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--ink-strong);
+}
+
+.install-type {
+  font-size: 0.76rem;
+  color: var(--ink-faint);
+  font-weight: 600;
+}
+
+.install-empty {
+  margin: 0 0 14px;
+  font-size: 0.86rem;
+  color: var(--ink-faint);
+}
+
+.btn-remove {
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  color: var(--ink-soft);
+  font-size: 0.78rem;
+  font-weight: 700;
+  padding: 6px 12px;
+  border-radius: var(--radius-inner);
+  cursor: pointer;
+  font-family: var(--font-sans);
+  transition: color 0.12s ease, border-color 0.12s ease;
+  flex-shrink: 0;
+}
+
+.btn-remove:hover:not(:disabled) {
+  color: #b91c1c;
+  border-color: #fca5a5;
+}
+
+.btn-remove:disabled { opacity: 0.5; cursor: not-allowed; }
+
+.btn-install {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  text-decoration: none;
+  border: 1px solid var(--accent-mid);
+  background: var(--accent-light);
+  color: var(--accent-hover);
+  font-size: 0.84rem;
+  font-weight: 700;
+  padding: 8px 14px;
+  border-radius: var(--radius-inner);
+  font-family: var(--font-sans);
+  transition: transform 0.12s ease, box-shadow 0.12s ease;
+}
+
+.btn-install:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(13,126,164,0.18);
 }
 
 .confirm-block { display: flex; flex-direction: column; gap: 12px; }

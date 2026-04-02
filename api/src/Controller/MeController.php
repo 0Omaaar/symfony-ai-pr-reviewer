@@ -20,9 +20,22 @@ class MeController extends AbstractController
 
         $githubAppInstalled = $user->getGithubInstallations()->count() > 0;
 
+        $installations = [];
+        foreach ($user->getGithubInstallations() as $link) {
+            $installation = $link->getInstallation();
+            if ($installation !== null) {
+                $installations[] = [
+                    'installation_id' => $installation->getInstallationId(),
+                    'account_login'   => $installation->getAccountLogin(),
+                    'account_type'    => $installation->getAccountType(),
+                ];
+            }
+        }
+
         return new JsonResponse([
             'authenticated' => true,
             'githubAppInstalled' => $githubAppInstalled,
+            'installations' => $installations,
             'user' => [
                 'id' => $user->getId(),
                 'githubId' => $user->getGithubId(),

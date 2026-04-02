@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
-import { RouterLink } from "vue-router";
+import { RouterLink, useRoute } from "vue-router";
 
 type DashboardSetup = {
   github_app_installed?: boolean;
@@ -60,6 +60,7 @@ type UiTopRepository = {
 
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 const DASHBOARD_CACHE_KEY = "dashboard.payload.v1";
+const route = useRoute();
 const isLoading = ref(false);
 const loadError = ref("");
 const generatedAt = ref<string | null>(null);
@@ -170,6 +171,57 @@ async function loadDashboard() {
   }
 }
 
+// ── Filters ───────────────────────────────────────────────────
+const filterStatus = ref<"all" | "open" | "merged" | "closed">("all");
+const filterRepo   = ref<string>("");
+const filterDate   = ref<"all" | "7d" | "30d">("all");
+
+const availableRepos = computed(() => {
+  const seen = new Set<string>();
+  recentPullRequests.value.forEach(pr => seen.add(pr.repoFullName));
+  return Array.from(seen).sort();
+});
+
+const filteredPullRequests = computed(() => {
+  let list = recentPullRequests.value;
+
+  if (filterStatus.value !== "all") {
+    list = list.filter(pr => pr.status === filterStatus.value);
+  }
+
+  if (filterRepo.value !== "") {
+    list = list.filter(pr => pr.repoFullName === filterRepo.value);
+  }
+
+  if (filterDate.value !== "all") {
+    const days  = filterDate.value === "7d" ? 7 : 30;
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - days);
+    list = list.filter(pr => pr.updatedAt !== null && new Date(pr.updatedAt) >= cutoff);
+  }
+
+  return list;
+});
+
+const hasActiveFilters = computed(
+  () => filterStatus.value !== "all" || filterRepo.value !== "" || filterDate.value !== "all"
+);
+
+function clearFilters() {
+  filterStatus.value = "all";
+  filterRepo.value   = "";
+  filterDate.value   = "all";
+}
+
+// ── Setup flash (from GitHub redirect) ───────────────────────
+const setupFlash = computed(() => {
+  const s = route.query.github_app_setup as string | undefined;
+  if (s === "success")                return { type: "success", msg: "GitHub App installed. Your repositories will sync shortly." };
+  if (s === "missing_user_session")   return { type: "error",   msg: "Installation failed: session expired. Please try again." };
+  if (s === "missing_installation_id") return { type: "error",  msg: "Installation failed: missing installation ID. Please try again." };
+  return null;
+});
+
 onMounted(() => {
   void loadDashboard();
 });
@@ -247,6 +299,11 @@ function prStatusClass(status: "open" | "merged" | "closed") {
       </div>
     </header>
 
+    <!-- Setup flash (GitHub redirect result) -->
+    <div v-if="setupFlash" class="alert" :class="setupFlash.type" role="alert">
+      {{ setupFlash.msg }}
+    </div>
+
     <div v-if="loadError" class="alert error" role="alert">
       {{ loadError }}
     </div>
@@ -257,6 +314,42 @@ function prStatusClass(status: "open" | "merged" | "closed") {
     </article>
 
     <template v-else>
+      <!-- ── Onboarding ──────────────────────────────────────────── -->
+      <section v-if="!setup.githubAppInstalled" class="onboarding-card">
+        <div class="ob-header">
+          <div class="ob-badge">Get started</div>
+          <h2 class="ob-title">Connect autoPMR to GitHub</h2>
+          <p class="ob-desc">Follow these two steps to start monitoring pull requests across your repositories.</p>
+        </div>
+        <div class="ob-steps">
+          <div class="ob-step">
+            <div class="ob-step-num">1</div>
+            <div class="ob-step-body">
+              <p class="ob-step-title">Install the GitHub App</p>
+              <p class="ob-step-hint">Grant autoPMR access to the repositories you want to monitor.</p>
+              <a :href="`${apiBaseUrl}/connect/github/app/install`" class="action-btn primary ob-cta">
+                Install GitHub App →
+              </a>
+            </div>
+            <span class="check-state todo">Pending</span>
+          </div>
+          <div class="ob-divider" aria-hidden="true"></div>
+          <div class="ob-step ob-step-muted">
+            <div class="ob-step-num">2</div>
+            <div class="ob-step-body">
+              <p class="ob-step-title">Repositories sync automatically</p>
+              <p class="ob-step-hint">Once the app is installed, your repositories and PRs appear here automatically.</p>
+            </div>
+            <span class="check-state todo">Waiting</span>
+          </div>
+        </div>
+      </section>
+
+      <div v-else-if="!setup.repositoriesConnected" class="alert success">
+        GitHub App is connected. Your repositories will appear here once synced.
+        <RouterLink :to="{ name: 'repos' }" class="alert-link">Go to repositories →</RouterLink>
+      </div>
+
       <section class="grid two-cols">
         <article class="panel setup-panel">
           <div class="section-head">
@@ -324,8 +417,31 @@ function prStatusClass(status: "open" | "merged" | "closed") {
             <span class="section-note">Latest 12 updates</span>
           </div>
 
-          <ul v-if="recentPullRequests.length > 0" class="pr-list">
-            <li v-for="pr in recentPullRequests" :key="pr.id" class="pr-item">
+          <!-- Filter bar -->
+          <div class="filter-bar">
+            <div class="filter-group">
+              <button
+                v-for="s in (['all', 'open', 'merged', 'closed'] as const)"
+                :key="s"
+                class="filter-btn"
+                :class="{ active: filterStatus === s }"
+                @click="filterStatus = s"
+              >{{ s === 'all' ? 'All' : s.charAt(0).toUpperCase() + s.slice(1) }}</button>
+            </div>
+            <select v-model="filterRepo" class="filter-select">
+              <option value="">All repos</option>
+              <option v-for="repo in availableRepos" :key="repo" :value="repo">{{ repo }}</option>
+            </select>
+            <select v-model="filterDate" class="filter-select">
+              <option value="all">All time</option>
+              <option value="7d">Last 7 days</option>
+              <option value="30d">Last 30 days</option>
+            </select>
+            <button v-if="hasActiveFilters" class="filter-clear" @click="clearFilters">✕ Clear</button>
+          </div>
+
+          <ul v-if="filteredPullRequests.length > 0" class="pr-list">
+            <li v-for="pr in filteredPullRequests" :key="pr.id" class="pr-item">
               <div class="pr-main">
                 <RouterLink :to="{ name: 'pr-details', params: { id: pr.id }, query: { repoId: String(pr.repoId) } }" class="pr-link">
                   #{{ pr.number }} {{ pr.title }}
@@ -338,6 +454,7 @@ function prStatusClass(status: "open" | "merged" | "closed") {
               </div>
             </li>
           </ul>
+          <p v-else-if="hasActiveFilters" class="empty-copy">No pull requests match the current filters.</p>
           <p v-else class="empty-copy">No pull requests found yet.</p>
         </article>
 
@@ -483,7 +600,200 @@ function prStatusClass(status: "open" | "merged" | "closed") {
   color: #991b1b;
   padding: 11px 14px;
   font-size: 0.88rem;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
 }
+
+.alert.success {
+  border-color: var(--merged-line);
+  background: var(--merged-bg);
+  color: var(--merged-ink);
+}
+
+.alert-link {
+  color: inherit;
+  font-weight: 700;
+  margin-left: auto;
+  white-space: nowrap;
+}
+
+/* ─── Onboarding card ────────────────────────────────────────── */
+.onboarding-card {
+  border: 1px solid var(--accent-mid);
+  border-radius: var(--radius-card);
+  background: linear-gradient(135deg, #f0f9ff 0%, #e8f4fd 100%);
+  box-shadow: var(--shadow-card);
+  padding: 24px 26px;
+}
+
+.ob-header { margin-bottom: 20px; }
+
+.ob-badge {
+  display: inline-block;
+  border-radius: var(--radius-pill);
+  padding: 3px 10px;
+  font-size: 0.7rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent-hover);
+  background: var(--accent-light);
+  border: 1px solid var(--accent-mid);
+  margin-bottom: 10px;
+}
+
+.ob-title {
+  margin: 0 0 6px;
+  font-size: 1.2rem;
+  font-weight: 800;
+  color: var(--ink-strong);
+  letter-spacing: -0.02em;
+}
+
+.ob-desc {
+  margin: 0;
+  font-size: 0.88rem;
+  color: var(--ink-soft);
+  line-height: 1.6;
+}
+
+.ob-steps { display: flex; flex-direction: column; gap: 0; }
+
+.ob-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  padding: 14px;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-inner);
+}
+
+.ob-step-muted { opacity: 0.55; }
+
+.ob-divider {
+  width: 2px;
+  height: 12px;
+  background: var(--line);
+  margin: 0 0 0 22px;
+}
+
+.ob-step-num {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: #fff;
+  font-size: 0.8rem;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.ob-step-muted .ob-step-num {
+  background: var(--line-strong);
+  color: var(--ink-faint);
+}
+
+.ob-step-body { flex: 1; }
+
+.ob-step-title {
+  margin: 0 0 3px;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--ink-strong);
+}
+
+.ob-step-hint {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--ink-soft);
+  line-height: 1.5;
+}
+
+.ob-cta {
+  display: inline-flex;
+  margin-top: 10px;
+  padding: 8px 14px;
+  font-size: 0.84rem;
+}
+
+/* ─── Filter bar ─────────────────────────────────────────────── */
+.filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--line);
+}
+
+.filter-group {
+  display: flex;
+  gap: 3px;
+  background: var(--surface-soft);
+  border: 1px solid var(--line);
+  border-radius: var(--radius-inner);
+  padding: 3px;
+}
+
+.filter-btn {
+  border: none;
+  background: transparent;
+  border-radius: 7px;
+  padding: 5px 10px;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--ink-soft);
+  cursor: pointer;
+  font-family: var(--font-sans);
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+.filter-btn:hover { color: var(--ink-body); background: var(--surface-raised); }
+
+.filter-btn.active {
+  background: var(--surface);
+  color: var(--accent);
+  box-shadow: 0 1px 4px rgba(12,26,46,0.08);
+  font-weight: 700;
+}
+
+.filter-select {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-inner);
+  background: var(--surface-soft);
+  color: var(--ink-body);
+  font-size: 0.78rem;
+  font-weight: 600;
+  font-family: var(--font-sans);
+  padding: 5px 8px;
+  cursor: pointer;
+  outline: none;
+}
+
+.filter-select:focus { border-color: var(--accent-mid); }
+
+.filter-clear {
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--ink-soft);
+  font-size: 0.75rem;
+  font-weight: 700;
+  font-family: var(--font-sans);
+  padding: 4px 10px;
+  cursor: pointer;
+  transition: color 0.12s ease;
+  margin-left: auto;
+}
+
+.filter-clear:hover { color: #b91c1c; border-color: #fca5a5; }
 
 /* ─── Panel ──────────────────────────────────────────────────── */
 .panel {

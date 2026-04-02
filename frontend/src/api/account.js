@@ -14,6 +14,20 @@ export async function deleteAccount() {
     return res.json();
 }
 
+export async function removeInstallation(installationId) {
+    const res = await fetch(`${apiBaseUrl}/api/account/installations/${installationId}`, {
+        method: "DELETE",
+        credentials: "include",
+    });
+
+    if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data?.error ?? `Request failed with status ${res.status}`);
+    }
+
+    return res.json();
+}
+
 export async function updateNotifications(enabled) {
     const res = await fetch(`${apiBaseUrl}/api/account/notifications`, {
         method: "PATCH",
