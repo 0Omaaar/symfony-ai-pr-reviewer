@@ -3,6 +3,7 @@
 namespace App\Controller\Api\Dashboard;
 
 use App\Entity\User;
+use App\Service\CacheKeys;
 use App\Service\Github\GithubInstallationRepositoriesService;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -36,7 +37,7 @@ final class DashboardController extends AbstractController
                 return $this->json(['ok' => false, 'error' => 'Invalid user context'], 400);
             }
 
-            $payload = $cache->get(sprintf('dashboard.payload.%d', $userId), function (ItemInterface $item) use ($service, $user): array {
+            $payload = $cache->get(CacheKeys::dashboardPayload($userId), function (ItemInterface $item) use ($service, $user): array {
                 $item->expiresAfter(90);
 
                 $repositories = $service->fetchForUser($user);

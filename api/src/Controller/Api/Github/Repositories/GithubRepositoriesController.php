@@ -3,6 +3,7 @@
 namespace App\Controller\Api\Github\Repositories;
 
 use App\Entity\User;
+use App\Service\CacheKeys;
 use App\Service\Github\GithubInstallationRepositoriesService;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
@@ -169,7 +170,7 @@ final class GithubRepositoriesController extends AbstractController
         }
         $user = $result;
 
-        $this->cache->delete(\sprintf('github_user_repositories.%d', $user->getId()));
+        $this->cache->delete(CacheKeys::userRepositories($user->getId()));
 
         return $this->json(['ok' => true]);
     }

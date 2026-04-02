@@ -4,34 +4,27 @@ namespace App\Service\Github;
 
 use App\Entity\User;
 use App\Entity\UserGithubInstallation;
+use App\Service\CacheKeys;
 use Doctrine\ORM\EntityManagerInterface;
-use Symfony\Component\DependencyInjection\ParameterBag\ParameterBagInterface;
 use Symfony\Contracts\Cache\CacheInterface;
 use Symfony\Contracts\Cache\ItemInterface;
-use Symfony\Contracts\HttpClient\HttpClientInterface;
 
 final class GithubInstallationRepositoriesService
 {
-    public function __construct(private readonly EntityManagerInterface $em,
-        private readonly HttpClientInterface $httpClient,
-        private readonly ParameterBagInterface $params,
-        private readonly CacheInterface $cache,)
-    {
+    public function __construct(
+        private readonly EntityManagerInterface $em,
+        private readonly GithubApiClient $apiClient,
+        private readonly CacheInterface $cache,
+        private readonly GithubAppJwtService $jwtService,
+    ) {
     }
 
     public function fetchForUser(User $user): array
     {
-        $userId = $user->getId();
-        if (!is_int($userId)) {
-            throw new \RuntimeException('User must be persisted before fetching repositories.');
-        }
+        $userId = $this->requireUserId($user);
 
-        $cacheKey = sprintf('github_user_repositories.%d', $userId);
-
-        return $this->cache->get($cacheKey, function (ItemInterface $item) use ($user): array {
+        return $this->cache->get(CacheKeys::userRepositories($userId), function (ItemInterface $item) use ($user): array {
             $repos = $this->fetchFreshForUser($user);
-
-            // Don't cache empty results — the user may not have installations yet
             $item->expiresAfter(empty($repos) ? 10 : 120);
 
             return $repos;
@@ -40,14 +33,9 @@ final class GithubInstallationRepositoriesService
 
     public function fetchDetailsForUserRepository(User $user, int $repoId): ?array
     {
-        $userId = $user->getId();
-        if (!is_int($userId)) {
-            throw new \RuntimeException('User must be persisted before fetching repository details.');
-        }
+        $userId = $this->requireUserId($user);
 
-        $cacheKey = sprintf('github_user_repository_details.%d.%d', $userId, $repoId);
-
-        return $this->cache->get($cacheKey, function (ItemInterface $item) use ($user, $repoId): ?array {
+        return $this->cache->get(CacheKeys::repositoryDetails($userId, $repoId), function (ItemInterface $item) use ($user, $repoId): ?array {
             $item->expiresAfter(120);
 
             return $this->buildRepositoryDetailsPayload($user, $repoId);
@@ -56,13 +44,8 @@ final class GithubInstallationRepositoriesService
 
     public function refreshDetailsForUserRepository(User $user, int $repoId): ?array
     {
-        $userId = $user->getId();
-        if (!is_int($userId)) {
-            throw new \RuntimeException('User must be persisted before refreshing repository details.');
-        }
-
-        $cacheKey = sprintf('github_user_repository_details.%d.%d', $userId, $repoId);
-        $this->cache->delete($cacheKey);
+        $userId = $this->requireUserId($user);
+        $this->cache->delete(CacheKeys::repositoryDetails($userId, $repoId));
 
         return $this->buildRepositoryDetailsPayload($user, $repoId);
     }
@@ -80,16 +63,16 @@ final class GithubInstallationRepositoriesService
 
     public function fetchLatestPullRequestEventForUserRepository(User $user, int $repoId): ?array
     {
-        $userId = $user->getId();
-        if (!is_int($userId)) {
-            throw new \RuntimeException('User must be persisted before fetching repository events.');
-        }
+        $userId = $this->requireUserId($user);
 
-        $event = $this->cache->get(sprintf('github_user_repository_latest_event.%d.%d', $userId, $repoId), static function (ItemInterface $item): ?array {
-            $item->expiresAfter(1);
+        $event = $this->cache->get(
+            CacheKeys::repositoryLatestEvent($userId, $repoId),
+            static function (ItemInterface $item): ?array {
+                $item->expiresAfter(1);
 
-            return null;
-        });
+                return null;
+            }
+        );
 
         return is_array($event) ? $event : null;
     }
@@ -125,11 +108,7 @@ final class GithubInstallationRepositoriesService
             }
 
             $userId = $appUser->getId();
-            if (!is_int($userId)) {
-                continue;
-            }
-
-            if (isset($processedUserIds[$userId])) {
+            if (!is_int($userId) || isset($processedUserIds[$userId])) {
                 continue;
             }
             $processedUserIds[$userId] = true;
@@ -138,13 +117,13 @@ final class GithubInstallationRepositoriesService
                 continue;
             }
 
-            $this->cache->delete(sprintf('github_user_repositories.%d', $userId));
-            $this->cache->delete(sprintf('dashboard.payload.%d', $userId));
-            $this->cache->delete(sprintf('github_user_repository_details.%d.%d', $userId, $repoId));
-            $this->cache->delete(sprintf('github_user_repository_pull_requests.%d.%d', $userId, $repoId));
-            $this->cache->delete(sprintf('github_user_repository_branches.%d.%d', $userId, $repoId));
-            $this->cache->delete(sprintf('github_user_repository_insights.%d.%d', $userId, $repoId));
-            $this->cache->delete(sprintf('github_user_pr_id_to_repo_id.%d', $userId));
+            $this->cache->delete(CacheKeys::userRepositories($userId));
+            $this->cache->delete(CacheKeys::dashboardPayload($userId));
+            $this->cache->delete(CacheKeys::repositoryDetails($userId, $repoId));
+            $this->cache->delete(CacheKeys::repositoryPullRequests($userId, $repoId));
+            $this->cache->delete(CacheKeys::repositoryBranches($userId, $repoId));
+            $this->cache->delete(CacheKeys::repositoryInsights($userId, $repoId));
+            $this->cache->delete(CacheKeys::prIdToRepoIdMap($userId));
 
             $eventPayload = [
                 'delivery_id' => $deliveryId,
@@ -156,7 +135,7 @@ final class GithubInstallationRepositoriesService
                 'occurred_at' => (new \DateTimeImmutable())->format(\DateTimeInterface::ATOM),
             ];
 
-            $eventKey = sprintf('github_user_repository_latest_event.%d.%d', $userId, $repoId);
+            $eventKey = CacheKeys::repositoryLatestEvent($userId, $repoId);
             $this->cache->delete($eventKey);
             $this->cache->get($eventKey, static function (ItemInterface $item) use ($eventPayload): array {
                 $item->expiresAfter(3600);
@@ -179,14 +158,9 @@ final class GithubInstallationRepositoriesService
 
     public function fetchPullRequestByIdForUser(User $user, int $pullRequestId): ?array
     {
-        $userId = $user->getId();
-        if (!is_int($userId)) {
-            throw new \RuntimeException('User must be persisted before fetching pull request details.');
-        }
+        $userId = $this->requireUserId($user);
 
-        $cacheKey = sprintf('github_user_pull_request_details.%d.%d', $userId, $pullRequestId);
-
-        return $this->cache->get($cacheKey, function (ItemInterface $item) use ($user, $pullRequestId): ?array {
+        return $this->cache->get(CacheKeys::pullRequestDetails($userId, $pullRequestId), function (ItemInterface $item) use ($user, $pullRequestId): ?array {
             $item->expiresAfter(120);
 
             $map = $this->buildPrIdToRepoIdMap($user);
@@ -203,10 +177,7 @@ final class GithubInstallationRepositoriesService
             $pullRequests = $this->fetchPullRequestsForUserRepository($user, $repoId);
             foreach ($pullRequests as $pullRequest) {
                 if (is_array($pullRequest) && isset($pullRequest['id']) && (int) $pullRequest['id'] === $pullRequestId) {
-                    return [
-                        'repository' => $repository,
-                        'pull_request' => $pullRequest,
-                    ];
+                    return ['repository' => $repository, 'pull_request' => $pullRequest];
                 }
             }
 
@@ -214,48 +185,11 @@ final class GithubInstallationRepositoriesService
         });
     }
 
-    private function buildPrIdToRepoIdMap(User $user): array
-    {
-        $userId = $user->getId();
-        if (!is_int($userId)) {
-            throw new \RuntimeException('User must be persisted before building PR index.');
-        }
-
-        $cacheKey = sprintf('github_user_pr_id_to_repo_id.%d', $userId);
-
-        return $this->cache->get($cacheKey, function (ItemInterface $item) use ($user): array {
-            $item->expiresAfter(120);
-
-            $map = [];
-            $repositories = $this->fetchForUser($user);
-            foreach ($repositories as $repository) {
-                if (!is_array($repository) || !is_int($repository['id'] ?? null)) {
-                    continue;
-                }
-
-                $repoId = $repository['id'];
-                $pullRequests = $this->fetchPullRequestsForUserRepository($user, $repoId);
-                foreach ($pullRequests as $pullRequest) {
-                    if (is_array($pullRequest) && is_int($pullRequest['id'] ?? null)) {
-                        $map[$pullRequest['id']] = $repoId;
-                    }
-                }
-            }
-
-            return $map;
-        });
-    }
-
     public function fetchPullRequestChangesByIdForUser(User $user, int $pullRequestId): ?array
     {
-        $userId = $user->getId();
-        if (!is_int($userId)) {
-            throw new \RuntimeException('User must be persisted before fetching pull request changes.');
-        }
+        $userId = $this->requireUserId($user);
 
-        $cacheKey = sprintf('github_user_pull_request_changes.%d.%d', $userId, $pullRequestId);
-
-        return $this->cache->get($cacheKey, function (ItemInterface $item) use ($user, $pullRequestId): ?array {
+        return $this->cache->get(CacheKeys::pullRequestChanges($userId, $pullRequestId), function (ItemInterface $item) use ($user, $pullRequestId): ?array {
             $item->expiresAfter(120);
 
             $details = $this->fetchPullRequestByIdForUser($user, $pullRequestId);
@@ -273,48 +207,21 @@ final class GithubInstallationRepositoriesService
                 return null;
             }
 
-            $jwt = $this->buildGithubAppJwt();
-            if ($jwt === null) {
-                throw new \RuntimeException('GITHUB APP JWT Cannot be created !');
-            }
-
-            $installationToken = $this->createInstallationToken($jwt, $installationId);
+            $installationToken = $this->getInstallationToken($installationId);
             if ($installationToken === null) {
                 return null;
             }
 
-            $headers = [
-                'Authorization' => 'Bearer ' . $installationToken,
-                'Accept' => 'application/vnd.github+json',
-                'X-GitHub-Api-Version' => '2022-11-28',
-            ];
-
-            $pullResponse = $this->httpClient->request(
-                'GET',
-                sprintf('https://api.github.com/repos/%s/pulls/%d', $fullName, $pullNumber),
-                ['headers' => $headers]
-            );
-            $pullData = $pullResponse->toArray(false);
+            $pullData = $this->apiClient->fetchPullRequest($installationToken, $fullName, $pullNumber);
 
             $files = [];
             $page = 1;
-            $hasMore = true;
-
             do {
-                $filesResponse = $this->httpClient->request(
-                    'GET',
-                    sprintf('https://api.github.com/repos/%s/pulls/%d/files?per_page=100&page=%d', $fullName, $pullNumber, $page),
-                    ['headers' => $headers]
-                );
-
-                $filesData = $filesResponse->toArray(false);
-                $fileItems = is_array($filesData) ? $filesData : [];
-
+                $fileItems = $this->apiClient->fetchPullRequestFiles($installationToken, $fullName, $pullNumber, $page);
                 foreach ($fileItems as $fileItem) {
                     if (!is_array($fileItem) || !is_string($fileItem['filename'] ?? null)) {
                         continue;
                     }
-
                     $files[] = [
                         'filename' => $fileItem['filename'],
                         'status' => is_string($fileItem['status'] ?? null) ? $fileItem['status'] : 'modified',
@@ -325,7 +232,6 @@ final class GithubInstallationRepositoriesService
                         'previous_filename' => is_string($fileItem['previous_filename'] ?? null) ? $fileItem['previous_filename'] : null,
                     ];
                 }
-
                 $hasMore = count($fileItems) === 100;
                 $page++;
             } while ($hasMore);
@@ -346,14 +252,9 @@ final class GithubInstallationRepositoriesService
 
     public function fetchBranchesForUserRepository(User $user, int $repoId): array
     {
-        $userId = $user->getId();
-        if (!is_int($userId)) {
-            throw new \RuntimeException('User must be persisted before fetching branches.');
-        }
+        $userId = $this->requireUserId($user);
 
-        $cacheKey = sprintf('github_user_repository_branches.%d.%d', $userId, $repoId);
-
-        return $this->cache->get($cacheKey, function (ItemInterface $item) use ($user, $repoId): array {
+        return $this->cache->get(CacheKeys::repositoryBranches($userId, $repoId), function (ItemInterface $item) use ($user, $repoId): array {
             $item->expiresAfter(120);
 
             $repository = $this->findUserRepositoryById($user, $repoId);
@@ -367,48 +268,25 @@ final class GithubInstallationRepositoriesService
                 return [];
             }
 
-            $jwt = $this->buildGithubAppJwt();
-            if ($jwt === null) {
-                throw new \RuntimeException('GITHUB APP JWT Cannot be created !');
-            }
-
-            $installationToken = $this->createInstallationToken($jwt, $installationId);
+            $installationToken = $this->getInstallationToken($installationId);
             if ($installationToken === null) {
                 return [];
             }
 
             $page = 1;
             $branches = [];
-            $hasMore = true;
-
             do {
-                $response = $this->httpClient->request(
-                    'GET',
-                    sprintf('https://api.github.com/repos/%s/branches?per_page=100&page=%d', $fullName, $page),
-                    [
-                        'headers' => [
-                            'Authorization' => 'Bearer ' . $installationToken,
-                            'Accept' => 'application/vnd.github+json',
-                            'X-GitHub-Api-Version' => '2022-11-28',
-                        ],
-                    ]
-                );
-
-                $data = $response->toArray(false);
-                $branchItems = is_array($data) ? $data : [];
-
+                $branchItems = $this->apiClient->fetchBranches($installationToken, $fullName, $page);
                 foreach ($branchItems as $branchItem) {
                     if (!is_array($branchItem) || !isset($branchItem['name'])) {
                         continue;
                     }
-
                     $branches[] = [
                         'name' => $branchItem['name'] ?? null,
                         'protected' => $branchItem['protected'] ?? false,
                         'commit_sha' => is_array($branchItem['commit'] ?? null) ? ($branchItem['commit']['sha'] ?? null) : null,
                     ];
                 }
-
                 $hasMore = count($branchItems) === 100;
                 $page++;
             } while ($hasMore);
@@ -419,14 +297,9 @@ final class GithubInstallationRepositoriesService
 
     public function fetchPullRequestsForUserRepository(User $user, int $repoId): array
     {
-        $userId = $user->getId();
-        if (!is_int($userId)) {
-            throw new \RuntimeException('User must be persisted before fetching pull requests.');
-        }
+        $userId = $this->requireUserId($user);
 
-        $cacheKey = sprintf('github_user_repository_pull_requests.%d.%d', $userId, $repoId);
-
-        return $this->cache->get($cacheKey, function (ItemInterface $item) use ($user, $repoId): array {
+        return $this->cache->get(CacheKeys::repositoryPullRequests($userId, $repoId), function (ItemInterface $item) use ($user, $repoId): array {
             $item->expiresAfter(120);
 
             $repository = $this->findUserRepositoryById($user, $repoId);
@@ -440,49 +313,21 @@ final class GithubInstallationRepositoriesService
                 return [];
             }
 
-            $jwt = $this->buildGithubAppJwt();
-            if ($jwt === null) {
-                throw new \RuntimeException('GITHUB APP JWT Cannot be created !');
-            }
-
-            $installationToken = $this->createInstallationToken($jwt, $installationId);
+            $installationToken = $this->getInstallationToken($installationId);
             if ($installationToken === null) {
                 return [];
             }
 
             $page = 1;
             $pullRequests = [];
-            $hasMore = true;
-
             do {
-                $response = $this->httpClient->request(
-                    'GET',
-                    sprintf('https://api.github.com/repos/%s/pulls?state=all&per_page=100&page=%d', $fullName, $page),
-                    [
-                        'headers' => [
-                            'Authorization' => 'Bearer ' . $installationToken,
-                            'Accept' => 'application/vnd.github+json',
-                            'X-GitHub-Api-Version' => '2022-11-28',
-                        ],
-                    ]
-                );
-
-                $data = $response->toArray(false);
-                $prItems = is_array($data) ? $data : [];
-
+                $prItems = $this->apiClient->fetchPullRequests($installationToken, $fullName, $page);
                 foreach ($prItems as $prItem) {
                     if (!is_array($prItem) || !isset($prItem['id']) || !isset($prItem['number'])) {
                         continue;
                     }
-
                     $state = is_string($prItem['state'] ?? null) ? $prItem['state'] : 'open';
-                    $status = $state;
-                    if (($prItem['merged_at'] ?? null) !== null) {
-                        $status = 'merged';
-                    } elseif ($state !== 'open') {
-                        $status = 'closed';
-                    }
-
+                    $status = ($prItem['merged_at'] ?? null) !== null ? 'merged' : ($state !== 'open' ? 'closed' : $state);
                     $pullRequests[] = [
                         'id' => $prItem['id'] ?? null,
                         'repo_id' => $repoId,
@@ -493,7 +338,6 @@ final class GithubInstallationRepositoriesService
                         'updated_at' => $prItem['updated_at'] ?? null,
                     ];
                 }
-
                 $hasMore = count($prItems) === 100;
                 $page++;
             } while ($hasMore);
@@ -504,14 +348,9 @@ final class GithubInstallationRepositoriesService
 
     public function fetchInsightsForUserRepository(User $user, int $repoId): array
     {
-        $userId = $user->getId();
-        if (!is_int($userId)) {
-            throw new \RuntimeException('User must be persisted before fetching repository insights.');
-        }
+        $userId = $this->requireUserId($user);
 
-        $cacheKey = sprintf('github_user_repository_insights.%d.%d', $userId, $repoId);
-
-        return $this->cache->get($cacheKey, function (ItemInterface $item) use ($user, $repoId): array {
+        return $this->cache->get(CacheKeys::repositoryInsights($userId, $repoId), function (ItemInterface $item) use ($user, $repoId): array {
             $item->expiresAfter(120);
 
             $repository = $this->findUserRepositoryById($user, $repoId);
@@ -525,54 +364,23 @@ final class GithubInstallationRepositoriesService
                 return [];
             }
 
-            $jwt = $this->buildGithubAppJwt();
-            if ($jwt === null) {
-                throw new \RuntimeException('GITHUB APP JWT Cannot be created !');
-            }
-
-            $installationToken = $this->createInstallationToken($jwt, $installationId);
+            $installationToken = $this->getInstallationToken($installationId);
             if ($installationToken === null) {
                 return [];
             }
 
-            $repoResponse = $this->httpClient->request(
-                'GET',
-                sprintf('https://api.github.com/repos/%s', $fullName),
-                [
-                    'headers' => [
-                        'Authorization' => 'Bearer ' . $installationToken,
-                        'Accept' => 'application/vnd.github+json',
-                        'X-GitHub-Api-Version' => '2022-11-28',
-                    ],
-                ]
-            );
-            $repoData = $repoResponse->toArray(false);
-
-            $contributorsResponse = $this->httpClient->request(
-                'GET',
-                sprintf('https://api.github.com/repos/%s/contributors?per_page=100&anon=1', $fullName),
-                [
-                    'headers' => [
-                        'Authorization' => 'Bearer ' . $installationToken,
-                        'Accept' => 'application/vnd.github+json',
-                        'X-GitHub-Api-Version' => '2022-11-28',
-                    ],
-                ]
-            );
-            $contributorsData = $contributorsResponse->toArray(false);
-            $contributors = is_array($contributorsData) ? $contributorsData : [];
+            $repoData = $this->apiClient->fetchRepository($installationToken, $fullName);
+            $contributors = $this->apiClient->fetchContributors($installationToken, $fullName);
 
             $participants = [];
             foreach ($contributors as $contributor) {
                 if (!is_array($contributor)) {
                     continue;
                 }
-
                 $login = $contributor['login'] ?? $contributor['name'] ?? null;
                 if (!is_string($login) || $login === '') {
                     continue;
                 }
-
                 $participants[] = [
                     'login' => $login,
                     'avatar_url' => is_string($contributor['avatar_url'] ?? null) ? $contributor['avatar_url'] : null,
@@ -581,7 +389,7 @@ final class GithubInstallationRepositoriesService
                 ];
             }
 
-            $commitsCount = $this->fetchCommitCount($fullName, $installationToken);
+            $commitsCount = $this->apiClient->fetchCommitCount($installationToken, $fullName);
 
             return [
                 'commits_count' => $commitsCount,
@@ -601,14 +409,18 @@ final class GithubInstallationRepositoriesService
         });
     }
 
+    // -------------------------------------------------------------------------
+    // Private helpers
+    // -------------------------------------------------------------------------
+
     private function fetchFreshForUser(User $user): array
     {
         $links = $this->em->getRepository(UserGithubInstallation::class)
             ->findBy(['appUser' => $user]);
 
-        $jwt = $this->buildGithubAppJwt();
+        $jwt = $this->jwtService->build();
         if ($jwt === null) {
-            throw new \RuntimeException('GITHUB APP JWT Cannot be created !');
+            throw new \RuntimeException('GITHUB APP JWT Cannot be created!');
         }
 
         $byRepoId = [];
@@ -620,36 +432,19 @@ final class GithubInstallationRepositoriesService
             }
 
             $installationId = $installation->getInstallationId();
-            $installationToken = $this->createInstallationToken($jwt, $installationId);
+            $installationToken = $this->apiClient->createInstallationToken($jwt, $installationId);
             if ($installationToken === null) {
                 continue;
             }
 
             $page = 1;
-            $hasMore = true;
             do {
-                $response = $this->httpClient->request(
-                    'GET',
-                    'https://api.github.com/installation/repositories?per_page=100&page=' . $page,
-                    [
-                        'headers' => [
-                            'Authorization' => 'Bearer ' . $installationToken,
-                            'Accept' => 'application/vnd.github+json',
-                            'X-GitHub-Api-Version' => '2022-11-28',
-                        ],
-                    ]
-                );
-
-                $data = $response->toArray(false);
-                $repos = is_array($data['repositories'] ?? null) ? $data['repositories'] : [];
-
-                foreach ($repos as $repo) {
+                $result = $this->apiClient->fetchInstallationRepositories($installationToken, $page);
+                foreach ($result['repositories'] as $repo) {
                     if (!is_array($repo) || !isset($repo['id'])) {
                         continue;
                     }
-
-                    $repoId = (string) $repo['id'];
-                    $byRepoId[$repoId] = [
+                    $byRepoId[(string) $repo['id']] = [
                         'id' => $repo['id'] ?? null,
                         'name' => $repo['name'] ?? null,
                         'full_name' => $repo['full_name'] ?? null,
@@ -659,21 +454,41 @@ final class GithubInstallationRepositoriesService
                         'installation_id' => $installationId,
                     ];
                 }
-
-                $totalCount = is_int($data['total_count'] ?? null) ? $data['total_count'] : 0;
-                $hasMore = ($page * 100) < $totalCount;
+                $hasMore = ($page * 100) < $result['total_count'];
                 $page++;
-            } while($hasMore);
+            } while ($hasMore);
         }
 
         return array_values($byRepoId);
     }
 
+    private function buildPrIdToRepoIdMap(User $user): array
+    {
+        $userId = $this->requireUserId($user);
+
+        return $this->cache->get(CacheKeys::prIdToRepoIdMap($userId), function (ItemInterface $item) use ($user): array {
+            $item->expiresAfter(120);
+
+            $map = [];
+            foreach ($this->fetchForUser($user) as $repository) {
+                if (!is_array($repository) || !is_int($repository['id'] ?? null)) {
+                    continue;
+                }
+                $repoId = $repository['id'];
+                foreach ($this->fetchPullRequestsForUserRepository($user, $repoId) as $pullRequest) {
+                    if (is_array($pullRequest) && is_int($pullRequest['id'] ?? null)) {
+                        $map[$pullRequest['id']] = $repoId;
+                    }
+                }
+            }
+
+            return $map;
+        });
+    }
+
     private function findUserRepositoryById(User $user, int $repoId): ?array
     {
-        $repos = $this->fetchForUser($user);
-
-        foreach ($repos as $repo) {
+        foreach ($this->fetchForUser($user) as $repo) {
             if (is_array($repo) && isset($repo['id']) && (int) $repo['id'] === $repoId) {
                 return $repo;
             }
@@ -697,104 +512,14 @@ final class GithubInstallationRepositoriesService
         ];
     }
 
-    private function createInstallationToken(string $appJwt, int $installationId): ?string
+    private function getInstallationToken(int $installationId): ?string
     {
-        $response = $this->httpClient->request(
-            'POST',
-            sprintf('https://api.github.com/app/installations/%d/access_tokens', $installationId),
-            [
-                'headers' => [
-                    'Authorization' => 'Bearer ' . $appJwt,
-                    'Accept' => 'application/vnd.github+json',
-                    'X-GitHub-Api-Version' => '2022-11-28',
-                ],
-            ]
-        );
-
-        $data = $response->toArray(false);
-        $token = $data['token'] ?? null;
-
-        return is_string($token) && $token !== '' ? $token : null;
-    }
-
-    private function fetchCommitCount(string $fullName, string $installationToken): int
-    {
-        $response = $this->httpClient->request(
-            'GET',
-            sprintf('https://api.github.com/repos/%s/commits?per_page=1&page=1', $fullName),
-            [
-                'headers' => [
-                    'Authorization' => 'Bearer ' . $installationToken,
-                    'Accept' => 'application/vnd.github+json',
-                    'X-GitHub-Api-Version' => '2022-11-28',
-                ],
-            ]
-        );
-
-        $statusCode = $response->getStatusCode();
-        if ($statusCode >= 400) {
-            return 0;
+        $jwt = $this->jwtService->build();
+        if ($jwt === null) {
+            throw new \RuntimeException('GITHUB APP JWT Cannot be created!');
         }
 
-        $headers = $response->getHeaders(false);
-        $linkHeader = null;
-        if (is_array($headers['link'] ?? null) && isset($headers['link'][0]) && is_string($headers['link'][0])) {
-            $linkHeader = $headers['link'][0];
-        }
-
-        if (is_string($linkHeader)) {
-            $lastPage = $this->extractLastPageFromLinkHeader($linkHeader);
-            if ($lastPage !== null) {
-                return $lastPage;
-            }
-        }
-
-        $data = $response->toArray(false);
-        return is_array($data) ? count($data) : 0;
-    }
-
-    private function extractLastPageFromLinkHeader(string $linkHeader): ?int
-    {
-        if (!preg_match('/[?&]page=(\d+)>;\s*rel="last"/', $linkHeader, $matches)) {
-            return null;
-        }
-
-        $lastPage = (int) ($matches[1] ?? 0);
-        return $lastPage > 0 ? $lastPage : null;
-    }
-
-    private function buildGithubAppJwt(): ?string
-    {
-        $appId = (string) $this->params->get('github.app_id');
-        $privateKeyPath = (string) $this->params->get('github.private_key_path');
-
-        if ($appId === '' || $privateKeyPath === '' || !is_file($privateKeyPath)) {
-            return null;
-        }
-
-        $privateKey = file_get_contents($privateKeyPath);
-        if (!is_string($privateKey) || $privateKey === '') {
-            return null;
-        }
-
-        $header = $this->base64UrlEncode(json_encode([
-            'alg' => 'RS256',
-            'typ' => 'JWT',
-        ], JSON_THROW_ON_ERROR));
-        $now = time();
-        $payload = $this->base64UrlEncode(json_encode([
-            'iat' => $now - 60,
-            'exp' => $now + 540,
-            'iss' => $appId,
-        ], JSON_THROW_ON_ERROR));
-
-        $unsigned = $header . "." . $payload;
-        $signature = '';
-        if (!openssl_sign($unsigned, $signature, $privateKey, OPENSSL_ALGO_SHA256)) {
-            return null;
-        }
-
-        return $unsigned . '.' . $this->base64UrlEncode($signature);
+        return $this->apiClient->createInstallationToken($jwt, $installationId);
     }
 
     private function buildPullRequestEventMessage(string $action, int $prNumber): string
@@ -810,8 +535,13 @@ final class GithubInstallationRepositoriesService
         };
     }
 
-    private function base64UrlEncode(string $data): string
+    private function requireUserId(User $user): int
     {
-        return rtrim(strtr(base64_encode($data), '+/', '-_'), '=');
+        $userId = $user->getId();
+        if (!is_int($userId)) {
+            throw new \RuntimeException('User must be persisted before accessing GitHub data.');
+        }
+
+        return $userId;
     }
 }

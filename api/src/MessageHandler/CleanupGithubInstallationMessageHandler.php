@@ -5,6 +5,7 @@ namespace App\MessageHandler;
 use App\Entity\GithubInstallation;
 use App\Entity\UserGithubInstallation;
 use App\Message\CleanupGithubInstallationMessage;
+use App\Service\CacheKeys;
 use Doctrine\ORM\EntityManagerInterface;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\Messenger\Attribute\AsMessageHandler;
@@ -56,8 +57,8 @@ final readonly class CleanupGithubInstallationMessageHandler
 
         // Bust server-side caches for every affected user
         foreach ($affectedUserIds as $userId) {
-            $this->cache->delete(\sprintf('github_user_repositories.%d', $userId));
-            $this->cache->delete(\sprintf('dashboard.payload.%d', $userId));
+            $this->cache->delete(CacheKeys::userRepositories($userId));
+            $this->cache->delete(CacheKeys::dashboardPayload($userId));
         }
 
         $this->logger->info('Installation cleanup complete', [

@@ -7,13 +7,14 @@ use App\Entity\User;
 use App\Entity\UserGithubInstallation;
 use App\Repository\GithubInstallationRepository;
 use App\Repository\UserGithubInstallationRepository;
+use App\Service\CacheKeys;
+use App\Service\Github\GithubApiClient;
+use App\Service\Github\GithubAppJwtService;
 use Doctrine\ORM\EntityManagerInterface;
 use KnpU\OAuth2ClientBundle\Client\ClientRegistry;
 use Psr\Log\LoggerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\DependencyInjection\ParameterBag\ParameterBagInterface;
-use Symfony\Contracts\HttpClient\Exception\TransportExceptionInterface as HttpClientExceptionInterface;
-use Symfony\Contracts\HttpClient\HttpClientInterface;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\RedirectResponse;
 use Symfony\Component\HttpFoundation\Request;
@@ -85,10 +86,11 @@ class OAuthController extends AbstractController
         GithubInstallationRepository $installationRepository,
         UserGithubInstallationRepository $userInstallationRepository,
         EntityManagerInterface $em,
-        HttpClientInterface $httpClient,
+        GithubApiClient $apiClient,
         ParameterBagInterface $params,
         LoggerInterface $logger,
-        CacheInterface $cache
+        CacheInterface $cache,
+        GithubAppJwtService $jwtService
     ): Response {
         $frontUrl = \rtrim((string) $params->get('front_url'), '/') ?: 'http://localhost:5173';
         $installationId = $request->query->getInt('installation_id', 0);
@@ -103,7 +105,7 @@ class OAuthController extends AbstractController
                 $em->persist($installation);
             }
 
-            $this->hydrateInstallationAccountFields($installation, $installationId, $httpClient, $params, $logger);
+            $this->hydrateInstallationAccountFields($installation, $installationId, $apiClient, $jwtService, $logger);
 
             if ($currentUser instanceof User) {
                 $link = $userInstallationRepository->findOneBy([
@@ -125,8 +127,8 @@ class OAuthController extends AbstractController
             // Bust caches so the new installation is reflected immediately
             if ($currentUser instanceof User && $currentUser->getId() !== null) {
                 $userId = $currentUser->getId();
-                $cache->delete("github_user_repositories.{$userId}");
-                $cache->delete("dashboard.payload.{$userId}");
+                $cache->delete(CacheKeys::userRepositories($userId));
+                $cache->delete(CacheKeys::dashboardPayload($userId));
             }
         } else {
             $setupStatus = 'missing_installation_id';
@@ -148,33 +150,22 @@ class OAuthController extends AbstractController
     private function hydrateInstallationAccountFields(
         GithubInstallation $installation,
         int $installationId,
-        HttpClientInterface $httpClient,
-        ParameterBagInterface $params,
+        GithubApiClient $apiClient,
+        GithubAppJwtService $jwtService,
         LoggerInterface $logger
     ): void {
-        $jwt = $this->buildGithubAppJwt($params);
+        $jwt = $jwtService->build();
         if ($jwt === null) {
             return;
         }
 
         try {
-            $response = $httpClient->request('GET', "https://api.github.com/app/installations/{$installationId}", [
-                'headers' => [
-                    'Authorization' => "Bearer {$jwt}",
-                    'Accept' => 'application/vnd.github+json',
-                    'X-GitHub-Api-Version' => '2022-11-28',
-                ],
-            ]);
-            $data = $response->toArray(false);
-        } catch (HttpClientExceptionInterface|\JsonException $e) {
+            $data = $apiClient->fetchInstallation($jwt, $installationId);
+        } catch (\Throwable $e) {
             $logger->warning('Failed fetching GitHub installation details', [
                 'installation_id' => $installationId,
                 'error' => $e->getMessage(),
             ]);
-            return;
-        }
-
-        if (!\is_array($data)) {
             return;
         }
 
@@ -194,39 +185,5 @@ class OAuthController extends AbstractController
         }
     }
 
-    private function buildGithubAppJwt(ParameterBagInterface $params): ?string
-    {
-        $appId = (string) $params->get('github.app_id');
-        $privateKeyPath = (string) $params->get('github.private_key_path');
-
-        if ($appId === '' || $privateKeyPath === '' || !\is_file($privateKeyPath)) {
-            return null;
-        }
-
-        $privateKey = \file_get_contents($privateKeyPath);
-        if (!\is_string($privateKey) || $privateKey === '') {
-            return null;
-        }
-
-        $header = $this->base64UrlEncode(\json_encode(['alg' => 'RS256', 'typ' => 'JWT'], JSON_THROW_ON_ERROR));
-        $now = \time();
-        $payload = $this->base64UrlEncode(\json_encode([
-            'iat' => $now - 60,
-            'exp' => $now + 540,
-            'iss' => $appId,
-        ], JSON_THROW_ON_ERROR));
-
-        $unsignedToken = "{$header}.{$payload}";
-        $signature = '';
-        if (!\openssl_sign($unsignedToken, $signature, $privateKey, OPENSSL_ALGO_SHA256)) {
-            return null;
-        }
-
-        return "{$unsignedToken}.{$this->base64UrlEncode($signature)}";
-    }
-
-    private function base64UrlEncode(string $data): string
-    {
-        return \rtrim(\strtr(\base64_encode($data), '+/', '-_'), '=');
-    }
 }
+

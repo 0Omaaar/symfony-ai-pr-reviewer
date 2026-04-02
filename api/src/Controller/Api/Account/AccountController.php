@@ -4,21 +4,20 @@ namespace App\Controller\Api\Account;
 
 use App\Entity\GithubInstallation;
 use App\Entity\User;
-use App\Entity\UserGithubInstallation;
+use App\Service\Account\AccountService;
 use Doctrine\ORM\EntityManagerInterface;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
 use Symfony\Component\HttpFoundation\JsonResponse;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\RequestStack;
 use Symfony\Component\Routing\Attribute\Route;
-use Symfony\Contracts\Cache\CacheInterface;
 
 final class AccountController extends AbstractController
 {
     public function __construct(
+        private readonly AccountService $accountService,
         private readonly EntityManagerInterface $em,
         private readonly RequestStack $requestStack,
-        private readonly CacheInterface $cache,
     ) {}
 
     #[Route('/api/account', name: 'api_account_delete', methods: ['DELETE'])]
@@ -29,39 +28,9 @@ final class AccountController extends AbstractController
             return $this->json(['ok' => false, 'error' => 'Unauthorized'], 401);
         }
 
-        // Collect installation IDs before removing links
-        $installationIds = [];
-        $userLinks = $this->em->getRepository(UserGithubInstallation::class)
-            ->findBy(['appUser' => $user]);
+        $this->accountService->deleteUser($user);
 
-        foreach ($userLinks as $link) {
-            $installation = $link->getInstallation();
-            if ($installation !== null && $installation->getId() !== null) {
-                $installationIds[] = $installation->getId();
-            }
-            $this->em->remove($link);
-        }
-
-        // Remove orphaned GithubInstallation records (no other users linked)
-        foreach ($installationIds as $installationId) {
-            $installation = $this->em->find(GithubInstallation::class, $installationId);
-            if ($installation === null) {
-                continue;
-            }
-
-            $remainingLinks = $this->em->getRepository(UserGithubInstallation::class)
-                ->count(['installation' => $installation]);
-
-            if ($remainingLinks === 0) {
-                $this->em->remove($installation);
-            }
-        }
-
-        $this->em->remove($user);
-        $this->em->flush();
-
-        $session = $this->requestStack->getSession();
-        $session->invalidate();
+        $this->requestStack->getSession()->invalidate();
 
         return $this->json(['ok' => true, 'message' => 'Account and all associated data deleted.']);
     }
@@ -81,28 +50,10 @@ final class AccountController extends AbstractController
             return $this->json(['ok' => false, 'error' => 'Installation not found'], 404);
         }
 
-        $link = $this->em->getRepository(UserGithubInstallation::class)
-            ->findOneBy(['appUser' => $user, 'installation' => $installation]);
-
-        if ($link === null) {
+        try {
+            $this->accountService->removeInstallation($user, $installation);
+        } catch (\InvalidArgumentException) {
             return $this->json(['ok' => false, 'error' => 'Installation not linked to your account'], 404);
-        }
-
-        $this->em->remove($link);
-        $this->em->flush();
-
-        // Remove the GithubInstallation record if no other users are linked to it
-        $remainingLinks = $this->em->getRepository(UserGithubInstallation::class)
-            ->count(['installation' => $installation]);
-
-        if ($remainingLinks === 0) {
-            $this->em->remove($installation);
-            $this->em->flush();
-        }
-
-        // Bust repos cache so the removed installation is no longer shown
-        if ($user->getId() !== null) {
-            $this->cache->delete(\sprintf('github_user_repositories.%d', $user->getId()));
         }
 
         return $this->json(['ok' => true]);
