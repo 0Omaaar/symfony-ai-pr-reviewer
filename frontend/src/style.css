@@ -1,0 +1,92 @@
+@import url("https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap");
+
+/* ─── Design Tokens ─────────────────────────────────────────── */
+:root {
+  /* Brand / Accent */
+  --accent:          #0d7ea4;
+  --accent-hover:    #0a6a8c;
+  --accent-light:    #e0f4fd;
+  --accent-mid:      #bae6f8;
+
+  /* Surfaces */
+  --surface:         #ffffff;
+  --surface-soft:    #f6f9fd;
+  --surface-raised:  #eef4fb;
+
+  /* Text */
+  --ink-strong:      #0c1a2e;
+  --ink-body:        #37485c;
+  --ink-soft:        #657484;
+  --ink-faint:       #a0adb9;
+
+  /* Borders */
+  --line:            #e2eaf5;
+  --line-strong:     #c5d4e8;
+
+  /* Status */
+  --open-bg:   #e8f5ff; --open-ink:   #1264a3; --open-line:   #9ecff5;
+  --merged-bg: #eaf7ed; --merged-ink: #1a6e3c; --merged-line: #96d9ae;
+  --closed-bg: #f3f5f7; --closed-ink: #526070; --closed-line: #c5cfd8;
+
+  /* Misc */
+  --radius-card:   16px;
+  --radius-inner:  10px;
+  --radius-pill:   999px;
+  --shadow-card:   0 1px 3px rgba(12,26,46,0.05), 0 6px 20px -6px rgba(12,26,46,0.08);
+  --shadow-hover:  0 4px 28px -6px rgba(12,26,46,0.14);
+  --font-sans:     "Manrope", "Nunito Sans", "Segoe UI", sans-serif;
+  --font-mono:     "JetBrains Mono", "Fira Code", Menlo, Monaco, Consolas, monospace;
+}
+
+/* ─── Reset ─────────────────────────────────────────────────── */
+*, *::before, *::after { box-sizing: border-box; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.6;
+  color: var(--ink-body);
+  background: #eef3fa;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ─── Shared Utilities ───────────────────────────────────────── */
+.status-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border-radius: var(--radius-pill);
+  padding: 3px 10px;
+  border: 1px solid transparent;
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.status-pill::before {
+  content: "";
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.status-pill.is-open   { background: var(--open-bg);   color: var(--open-ink);   border-color: var(--open-line); }
+.status-pill.is-open::before   { background: var(--open-ink); }
+.status-pill.is-merged { background: var(--merged-bg); color: var(--merged-ink); border-color: var(--merged-line); }
+.status-pill.is-merged::before { background: var(--merged-ink); }
+.status-pill.is-closed { background: var(--closed-bg); color: var(--closed-ink); border-color: var(--closed-line); }
+.status-pill.is-closed::before { background: var(--closed-ink); }
+
+/* ─── Spinner ───────────────────────────────────────────────── */
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ─── Scrollbar ─────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--line-strong); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--ink-faint); }

@@ -3,7 +3,23 @@ framework:
     secret: '%env(APP_SECRET)%'
 
     # Note that the session will be started ONLY if you read or write from it.
-    session: true
+    session:
+        cookie_lifetime: 604800   # cookie lives 7 days in browser
+        gc_maxlifetime: 604800    # server keeps session data for 7 days
+        cookie_secure: auto       # HTTPS only in prod, HTTP allowed in dev
+        cookie_samesite: lax
+
+    rate_limiter:
+        # Webhook: 600 deliveries/minute per IP — protects against replay floods
+        github_webhook:
+            policy: fixed_window
+            limit: 600
+            interval: '1 minute'
+        # API: 120 requests/minute per authenticated user
+        api_user:
+            policy: sliding_window
+            limit: 120
+            interval: '1 minute'
 
     #esi: true
     #fragments: true
