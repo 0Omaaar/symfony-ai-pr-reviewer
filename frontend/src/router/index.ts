@@ -45,8 +45,16 @@ router.beforeEach(async (to, from) => {
     }
 
     if (cachedAuth === false) {
-        if (to.meta.requiresAuth) return { name: "login" };
-        return true;
+        // Non-auth routes (landing, login) are always allowed without a network call.
+        if (!to.meta.requiresAuth) return true;
+        // For protected routes, re-validate in case auth state changed (e.g. just logged in).
+        try {
+            const me = await fetchMe();
+            if (!me?.authenticated) return { name: "login" };
+            return true;
+        } catch {
+            return { name: "login" };
+        }
     }
 
     try {
