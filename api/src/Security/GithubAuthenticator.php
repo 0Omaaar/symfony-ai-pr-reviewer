@@ -87,8 +87,8 @@ class GithubAuthenticator extends OAuth2Authenticator
 
     public function onAuthenticationSuccess(Request $request, TokenInterface $token, string $firewallName): ?Response
     {
-        // Redirect back to frontend after successful login
-        return new RedirectResponse($this->frontUrl);
+        // Redirect back to frontend dashboard after successful login
+        return new RedirectResponse(rtrim($this->frontUrl, '/') . '/dashboard');
     }
 
     public function onAuthenticationFailure(Request $request, AuthenticationException $exception): ?Response

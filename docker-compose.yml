@@ -18,6 +18,9 @@ services:
       PR_ALERT_FROM_NAME: "autoPMR"
       PR_ALERT_REPLY_TO: ""
       PR_ALERT_FRONT_URL: "http://localhost:5173"
+      ADMIN_EMAIL: "admin@admin.com"
+      ADMIN_PASSWORD: "adminadmin"
+      ADMIN_SECRET: "change-me-in-production-use-a-long-random-string"
     volumes:
       - ./api:/app
       - api_vendor:/app/vendor
