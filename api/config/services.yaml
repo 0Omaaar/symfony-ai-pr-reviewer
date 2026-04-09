@@ -18,6 +18,7 @@ parameters:
     pr_alert.front_url: '%env(PR_ALERT_FRONT_URL)%'
     admin.email: '%env(ADMIN_EMAIL)%'
     admin.password: '%env(ADMIN_PASSWORD)%'
+    n8n.internal_token: '%env(N8N_INTERNAL_TOKEN)%'
 
 services:
     # default configuration for services in *this* file

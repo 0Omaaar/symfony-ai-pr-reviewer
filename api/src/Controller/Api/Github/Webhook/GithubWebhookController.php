@@ -37,7 +37,12 @@ final class GithubWebhookController extends AbstractController
         $signature = (string) $request->headers->get('X-Hub-Signature-256', '');
         $deliveryId = (string) $request->headers->get('X-GitHub-Delivery', '');
 
-        if (!$this->webhookService->verifySignature($rawBody, $signature)) {
+        $internalToken = (string) $request->headers->get('X-Internal-Token', '');
+        $expectedToken = (string) $this->getParameter('n8n.internal_token');
+
+        if ($internalToken !== '' && hash_equals($expectedToken, $internalToken)) {
+            // Authenticated via internal token (n8n forwarding) — skip signature check
+        } elseif (!$this->webhookService->verifySignature($rawBody, $signature)) {
             return $this->json(['ok' => false, 'error' => 'Invalid signature'], Response::HTTP_UNAUTHORIZED);
         }
 

@@ -6,7 +6,7 @@ services:
     environment: &api_env
       APP_ENV: dev
       DATABASE_URL: "postgresql://app:!ChangeMe!@database:5432/app?serverVersion=16&charset=utf8"
-      MAILER_DSN: "smtp://mailer:1025"
+      MAILER_DSN: "smtp://elkhotriomarpro%40gmail.com:kckfozwgpcnlzxlv@smtp.gmail.com:587?encryption=tls&auth_mode=login"
       GITHUB_APP_ID: "2860467"
       GITHUB_APP_INSTALL_URL: "https://github.com/apps/symfony-ai-pr-reviewer-bot/installations/new"
       GITHUB_WEBHOOK_SECRET: "symfony-ai-pr-reviewer-bot-12345"
@@ -21,6 +21,7 @@ services:
       ADMIN_EMAIL: "admin@admin.com"
       ADMIN_PASSWORD: "adminadmin"
       ADMIN_SECRET: "change-me-in-production-use-a-long-random-string"
+      N8N_INTERNAL_TOKEN: "changeme-internal-token"
     volumes:
       - ./api:/app
       - api_vendor:/app/vendor
@@ -110,6 +111,25 @@ services:
     depends_on:
       - prometheus
 
+  n8n:
+    image: n8nio/n8n:latest
+    ports:
+      - "5678:5678"
+    environment:
+      N8N_BASIC_AUTH_ACTIVE: "true"
+      N8N_BASIC_AUTH_USER: "admin@admin.com"
+      N8N_BASIC_AUTH_PASSWORD: adminadmin
+      N8N_HOST: localhost
+      N8N_PORT: 5678
+      N8N_PROTOCOL: http
+      WEBHOOK_URL: "https://5729-105-190-151-180.ngrok-free.app/"
+      GENERIC_TIMEZONE: UTC
+      N8N_INTERNAL_TOKEN: "changeme-internal-token"
+    volumes:
+      - n8n_data:/home/node/.n8n
+    depends_on:
+      - api
+
   csfixer:
     image: cytopia/php-cs-fixer:latest
     working_dir: /workdir
@@ -119,3 +139,4 @@ services:
 volumes:
   database_data:
   api_vendor:
+  n8n_data:
