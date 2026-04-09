@@ -8,7 +8,8 @@ GitHub pull request monitoring platform. Connects to your GitHub App installatio
 - **Frontend**: Vue 3 + Vite + TypeScript SPA
 - **Database**: PostgreSQL
 - **Cache**: Redis (configurable via `MESSENGER_TRANSPORT_DSN` / Symfony Cache)
-- **Email**: Symfony Mailer (Mailpit locally)
+- **Email**: Symfony Mailer (Gmail SMTP in dev, configurable per environment)
+- **Workflow Automation**: n8n (webhook splitter / orchestration layer)
 - **Observability**: Prometheus + Grafana
 - **Local orchestration**: Docker Compose
 
@@ -18,7 +19,19 @@ GitHub pull request monitoring platform. Connects to your GitHub App installatio
 autoPMR/
 ├── api/                          # Symfony 8 backend
 │   ├── src/
-│   │   ├── Controller/           # HTTP layer only — thin, delegates to services
+│   │   ├── Controller/
+│   │   │   ├── Api/              # User-facing API endpoints
+│   │   │   │   ├── Github/       # GitHub OAuth & webhook controllers
+│   │   │   │   └── WebhookController.php  # n8n internal webhook receiver
+│   │   │   └── Admin/            # Admin backoffice API
+│   │   │       ├── AdminAuthController.php
+│   │   │       ├── AdminUsersController.php
+│   │   │       ├── AdminReposController.php
+│   │   │       ├── AdminStatsController.php
+│   │   │       ├── AdminLogsController.php
+│   │   │       ├── AdminNotificationsController.php
+│   │   │       ├── AdminSettingsController.php
+│   │   │       └── AdminWebhookEventsController.php
 │   │   ├── Service/
 │   │   │   ├── Github/
 │   │   │   │   ├── GithubApiClient.php         # All GitHub HTTP calls
@@ -27,21 +40,31 @@ autoPMR/
 │   │   │   │   └── GithubInstallationRepositoriesService.php
 │   │   │   ├── Account/
 │   │   │   │   └── AccountService.php          # User deletion + installation removal
+│   │   │   ├── Admin/
+│   │   │   │   └── AdminJwtService.php         # Admin JWT token creation/verification
 │   │   │   └── CacheKeys.php                   # Central cache key registry
-│   │   ├── Entity/               # Doctrine entities
+│   │   ├── Entity/               # Doctrine entities (User, AdminLog, PlatformSetting, …)
 │   │   ├── Repository/           # Doctrine repositories (DB queries only)
 │   │   ├── Message/              # Async message classes
 │   │   ├── MessageHandler/       # Async message handlers
-│   │   └── Security/             # GitHub OAuth authenticator
+│   │   └── Security/
+│   │       ├── GithubAuthenticator.php       # GitHub OAuth authenticator
+│   │       ├── AdminJwtAuthenticator.php     # Admin JWT authenticator (header + query param)
+│   │       └── AdminUser.php                 # In-memory admin user
 │   ├── templates/
 │   │   └── email/
-│   │       └── pr_notification.html.twig   # PR alert email template
+│   │       └── pr_notification.html.twig     # PR alert email template
 │   └── config/
 ├── frontend/                     # Vue 3 SPA
 │   └── src/
-│       ├── views/                # Page components
-│       ├── router/               # Vue Router (auth guards)
-│       └── api/                  # API client functions
+│       ├── views/
+│       │   ├── admin/            # Admin backoffice pages
+│       │   └── …                 # User-facing pages
+│       ├── router/               # Vue Router (user + admin auth guards)
+│       └── api/                  # API client functions (incl. admin.ts)
+├── n8n/
+│   └── workflows/
+│       └── github-pr-review.json # n8n workflow definition (import manually)
 ├── docker-compose.yml
 └── prometheus/
 ```
@@ -62,16 +85,26 @@ autoPMR/
 3. Backend records the `GithubInstallation` and links it to the user
 4. User's repo and dashboard caches are busted immediately
 
-### Pull Request Webhook Flow
+### Pull Request Webhook Flow (via n8n)
 
-1. GitHub POSTs to `/webhooks/github` with HMAC signature
-2. `GithubWebhookService` verifies the signature and checks idempotency
-3. Controller dispatches `ReviewPullRequestMessage` to the async bus
-4. Worker (`ReviewPullRequestMessageHandler`) processes the message:
+1. GitHub POSTs to n8n webhook endpoint (`/webhook/github-pr`)
+2. n8n forwards the raw payload to the original Symfony endpoint (`/webhooks/github`) with an internal token for auth (bypasses HMAC since n8n re-serializes the body)
+3. `GithubWebhookService` verifies the token and checks idempotency
+4. Controller dispatches `ReviewPullRequestMessage` to the async bus
+5. Worker (`ReviewPullRequestMessageHandler`) processes the message:
    - Finds all users linked to the installation
    - Filters by per-user notification preferences (event type + repo whitelist)
    - Sends HTML email (rendered from Twig template) + text fallback
    - Busts affected caches
+6. In parallel, n8n filters for `opened|reopened|synchronize` actions and calls `/api/webhooks/github` with extracted fields
+7. Worker (`ProcessPullRequestHandler`) logs the PR data (AI review pipeline — TODO)
+
+### Admin Backoffice
+
+1. Admin logs in at `/admin/login` with email/password credentials
+2. Backend issues a JWT token (HS256, 8h TTL)
+3. All `/api/admin/*` endpoints require the JWT via `Authorization: Bearer` header (or `?token=` query param for CSV exports)
+4. Admin can view/manage users, repositories, webhook events, logs, notifications, and platform settings
 
 ## API Endpoints
 
@@ -96,7 +129,21 @@ autoPMR/
 | `GET` | `/connect/github/app/install` | Redirect to GitHub App install page |
 | `GET` | `/connect/github/app/setup` | Post-install setup callback |
 | `POST` | `/webhooks/github` | GitHub webhook receiver |
+| `POST` | `/api/webhooks/github` | n8n internal webhook (GitHub) |
+| `POST` | `/api/webhooks/gitlab` | n8n internal webhook (GitLab — stub) |
 | `GET` | `/unsubscribe/{token}` | One-click email unsubscribe |
+| | | |
+| **Admin** | | |
+| `POST` | `/api/admin/auth/login` | Admin login (returns JWT) |
+| `GET` | `/api/admin/stats` | Dashboard KPIs |
+| `GET` | `/api/admin/users` | List users (paginated, searchable) |
+| `GET` | `/api/admin/users/{id}` | User detail |
+| `GET` | `/api/admin/repos` | List repositories |
+| `GET` | `/api/admin/webhook-events` | List webhook events |
+| `GET` | `/api/admin/notifications` | List sent notifications |
+| `GET` | `/api/admin/logs` | Admin audit logs (paginated, filterable, CSV export) |
+| `GET` | `/api/admin/settings` | Platform settings |
+| `PATCH` | `/api/admin/settings` | Update platform settings |
 
 ## Notification Preferences
 
@@ -161,6 +208,14 @@ PR_ALERT_FRONT_URL=http://localhost:5173
 
 DATABASE_URL=postgresql://app:!ChangeMe!@127.0.0.1:5432/app
 MESSENGER_TRANSPORT_DSN=doctrine://default?auto_setup=0
+
+# n8n integration
+N8N_INTERNAL_TOKEN=changeme-internal-token
+
+# Admin backoffice
+ADMIN_EMAIL=admin@admin.com
+ADMIN_PASSWORD=adminadmin
+ADMIN_SECRET=change-me-in-production-use-a-long-random-string
 ```
 
 ### Start everything
@@ -186,12 +241,24 @@ make build
 make csfix   # Run PHP CS Fixer
 ```
 
+### n8n Setup
+
+1. Start containers: `docker compose up -d`
+2. Open n8n at <http://localhost:5678> and complete the setup wizard (create your account)
+3. Import the workflow from `n8n/workflows/github-pr-review.json`
+4. Activate the workflow
+5. Set your GitHub App's webhook URL to your n8n webhook endpoint (e.g. `https://your-ngrok-url/webhook/github-pr`)
+
+> **Note**: n8n data is stored in the `n8n_data` Docker volume. It persists across `docker compose down` but is deleted with `docker compose down -v`.
+
 ## Local URLs
 
 | Service | URL |
 | ------- | --- |
 | Frontend | <http://localhost:5173> |
 | API | <http://localhost:8000> |
+| Admin Backoffice | <http://localhost:5173/admin> |
+| n8n | <http://localhost:5678> |
 | pgAdmin | <http://localhost:5050> |
 | Mailpit UI | <http://localhost:8025> |
 | Prometheus | <http://localhost:9090> |
@@ -204,6 +271,8 @@ make csfix   # Run PHP CS Fixer
 | PostgreSQL | DB: `app` / User: `app` / Password: `!ChangeMe!` |
 | pgAdmin | Email: `admin@example.com` / Password: `admin` |
 | Grafana | User: `admin` / Password: `admin` |
+| Admin Backoffice | Email: `admin@admin.com` / Password: `adminadmin` |
+| n8n | Created during setup wizard |
 
 Change all of these for any shared, staging, or production environment.
 
@@ -223,13 +292,14 @@ Change all of these for any shared, staging, or production environment.
 - Settings page: notification preferences + email toggle
 - Account deletion and installation removal
 - Landing page + Vue Router auth guards
+- n8n integration as webhook splitter (forwards to email pipeline + future AI pipeline)
+- Admin backoffice (JWT auth, user/repo/log management, dashboard stats, platform settings, CSV export)
 
 ### Not Implemented Yet
 
+- AI review pipeline (handler stub in place, needs implementation)
 - Multi-provider support (GitLab stub only)
 - Persistent domain storage for PR snapshots and review history
-- Background AI analysis pipeline and results UI
 - Tenant/workspace model and role-based permissions
 - Billing / subscription features
 - Full automated test coverage and CI quality gates
-- Production hardening (audit logs, structured observability)
