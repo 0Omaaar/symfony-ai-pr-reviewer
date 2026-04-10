@@ -56,8 +56,10 @@ class GithubAuthenticator extends OAuth2Authenticator
             throw new AuthenticationException('Failed to get access token from GitHub', 0, $e);
         }
 
+        $tokenString = $accessToken->getToken();
+
         return new SelfValidatingPassport(
-            new UserBadge($githubId, function (string $githubId) use ($username, $email) {
+            new UserBadge($githubId, function (string $githubId) use ($username, $email, $tokenString) {
                 $repo = $this->em->getRepository(User::class);
 
                 /** @var User|null $user */
@@ -76,6 +78,7 @@ class GithubAuthenticator extends OAuth2Authenticator
                 // Refresh profile fields on every login.
                 $user->setGithubUsername($username ?? '');
                 $user->setEmail($email);
+                $user->setGithubAccessToken($tokenString);
 
                 $this->em->persist($user);
                 $this->em->flush();
@@ -101,7 +104,11 @@ class GithubAuthenticator extends OAuth2Authenticator
     public function start(Request $request, ?AuthenticationException $authException = null): Response
     {
         if (str_starts_with($request->getPathInfo(), '/api/')) {
-            return new JsonResponse(['authenticated' => false], Response::HTTP_UNAUTHORIZED);
+            return new JsonResponse([
+                'error' => 'unauthenticated',
+                'message' => 'Full authentication is required to access this resource.',
+                'authenticated' => false,
+            ], Response::HTTP_UNAUTHORIZED);
         }
 
         return new RedirectResponse('/connect/github');

@@ -11,7 +11,8 @@ final readonly class ReviewPullRequestMessage
         public int $prNumber,
         public string $action,
         public string $headSha,
-        public string $deliveryId
+        public string $deliveryId,
+        public string $baseBranch = '',
     ) {
     }
 }

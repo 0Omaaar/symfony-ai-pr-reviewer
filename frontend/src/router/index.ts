@@ -68,7 +68,6 @@ router.beforeEach(async (to, from) => {
         return true;
     }
 
-    // If already-authenticated admin hits /admin/login → redirect to dashboard
     if (to.meta.adminLoginPage) {
         if (isAdminAuthenticated()) {
             return { name: "admin-dashboard" };
@@ -77,14 +76,18 @@ router.beforeEach(async (to, from) => {
     }
 
     // ── User app guard ────────────────────────────────────────────────────
-    // Fast-path for explicit logout redirect so user lands on login immediately.
     if (to.name === "login" && to.query.logged_out === "1") {
+        setCachedAuth(false);
         return true;
     }
 
-    const cachedAuth = getCachedAuth();
+    // For routes that don't require auth and aren't guest-only, let them through
+    if (!to.meta.requiresAuth && !to.meta.guestOnly) {
+        return true;
+    }
 
-    // Do not block UI when navigating inside authenticated pages.
+    // When navigating between authenticated pages, allow navigation immediately
+    // but verify session in the background
     if (from.meta.requiresAuth && to.meta.requiresAuth) {
         void fetchMe().catch(() => {
             setCachedAuth(false);
@@ -92,34 +95,25 @@ router.beforeEach(async (to, from) => {
         return true;
     }
 
-    if (cachedAuth === true) {
-        if (to.meta.guestOnly) return { name: "dashboard" };
-        return true;
-    }
-
-    if (cachedAuth === false) {
-        // Non-auth routes (landing, login) are always allowed without a network call.
-        if (!to.meta.requiresAuth) return true;
-        // For protected routes, re-validate in case auth state changed (e.g. just logged in).
-        try {
-            const me = await fetchMe();
-            if (!me?.authenticated) return { name: "login" };
-            return true;
-        } catch {
-            return { name: "login" };
-        }
-    }
-
+    // Always verify with the server — never redirect based on local cache alone
     try {
         const me = await fetchMe();
         const isAuthenticated = !!me?.authenticated;
 
-        if (to.meta.requiresAuth && !isAuthenticated) return { name: "login" };
-        if (to.meta.guestOnly && isAuthenticated) return { name: "dashboard" };
+        if (to.meta.requiresAuth && !isAuthenticated) {
+            return { name: "login" };
+        }
+        if (to.meta.guestOnly && isAuthenticated) {
+            return { name: "dashboard" };
+        }
 
         return true;
     } catch {
-        if (to.meta.requiresAuth) return { name: "login" };
+        // Network error — use cached state as fallback
+        const cachedAuth = getCachedAuth();
+        if (to.meta.requiresAuth && cachedAuth !== true) {
+            return { name: "login" };
+        }
         return true;
     }
 });

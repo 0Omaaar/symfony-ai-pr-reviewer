@@ -2,6 +2,7 @@
 import { computed, onMounted, ref, watch } from "vue";
 import type { Repository } from "@/types/repository";
 import { useRouter } from "vue-router";
+import { getSubscriptions, activateSubscription, deactivateSubscription, type Subscription } from "@/api/subscriptions";
 
 const search = ref("");
 const router = useRouter();
@@ -9,6 +10,8 @@ const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 const repos = ref<Repository[]>([]);
 const isLoading = ref(false);
 const fetchError = ref("");
+const subscriptions = ref<Subscription[]>([]);
+const togglingRepo = ref<string | null>(null);
 
 function goToRepo(id: number) {
   router.push({ name: "repo-details", params: { id } });
@@ -18,6 +21,8 @@ type GithubRepositoryApiItem = {
   id?: number;
   name?: string;
   full_name?: string;
+  default_branch?: string;
+  installation_id?: number;
 };
 
 type GithubRepositoriesApiResponse = {
@@ -34,6 +39,8 @@ function mapApiRepository(item: GithubRepositoryApiItem): Repository | null {
     id: item.id,
     provider: "github",
     fullName,
+    defaultBranch: typeof item.default_branch === "string" ? item.default_branch : null,
+    installationId: typeof item.installation_id === "number" ? item.installation_id : null,
   };
 }
 
@@ -73,8 +80,51 @@ async function loadUserRepos() {
   }
 }
 
+async function loadSubscriptions() {
+  try {
+    const data = await getSubscriptions();
+    subscriptions.value = data.data;
+  } catch {
+    subscriptions.value = [];
+  }
+}
+
+function isRepoMonitored(fullName: string): boolean {
+  return subscriptions.value.some((s) => s.repoFullName === fullName && s.isActive);
+}
+
+function getRepoActiveCount(fullName: string): number {
+  return subscriptions.value.filter((s) => s.repoFullName === fullName && s.isActive).length;
+}
+
+async function toggleDefaultBranch(repo: Repository, event: Event) {
+  event.stopPropagation();
+  const branch = repo.defaultBranch ?? "main";
+  const fullName = repo.fullName;
+  togglingRepo.value = fullName;
+
+  try {
+    if (isRepoMonitored(fullName)) {
+      await deactivateSubscription(fullName, branch);
+    } else {
+      await activateSubscription(
+        fullName,
+        String(repo.id),
+        String(repo.installationId ?? ""),
+        branch
+      );
+    }
+    await loadSubscriptions();
+  } catch {
+    // revert is handled by re-fetching subscriptions
+  } finally {
+    togglingRepo.value = null;
+  }
+}
+
 onMounted(() => {
   void loadUserRepos();
+  void loadSubscriptions();
 });
 
 const filteredRepos = computed(() => {
@@ -182,7 +232,7 @@ function providerClass(provider: Repository["provider"]) {
 
     <div v-else class="repos-grid-wrap">
       <div v-if="paginatedRepos.length > 0" class="repos-grid">
-        <button
+        <div
           v-for="repo in paginatedRepos"
           :key="repo.id"
           class="repo-card"
@@ -196,11 +246,25 @@ function providerClass(provider: Repository["provider"]) {
             <span class="chip provider-chip" :class="providerClass(repo.provider)">
               {{ providerLabel(repo.provider) }}
             </span>
+            <span v-if="isRepoMonitored(repo.fullName)" class="chip monitored-chip">
+              {{ getRepoActiveCount(repo.fullName) }} branch{{ getRepoActiveCount(repo.fullName) === 1 ? '' : 'es' }} monitored
+            </span>
           </div>
+          <button
+            type="button"
+            class="toggle-btn"
+            :class="{ 'is-active': isRepoMonitored(repo.fullName), 'is-loading': togglingRepo === repo.fullName }"
+            :disabled="togglingRepo === repo.fullName"
+            :title="isRepoMonitored(repo.fullName) ? 'Stop monitoring default branch' : 'Monitor default branch (' + (repo.defaultBranch ?? 'main') + ')'"
+            @click="toggleDefaultBranch(repo, $event)"
+          >
+            <span v-if="togglingRepo === repo.fullName" class="toggle-spinner"></span>
+            <span v-else class="toggle-knob"></span>
+          </button>
           <span class="repo-card-arrow" aria-hidden="true">
             <svg viewBox="0 0 24 24" fill="currentColor" width="16" height="16"><path d="M8.59 16.59L13.17 12 8.59 7.41 10 6l6 6-6 6z"/></svg>
           </span>
-        </button>
+        </div>
       </div>
 
       <div v-else class="empty">
@@ -468,6 +532,63 @@ function providerClass(provider: Repository["provider"]) {
 .provider-chip.is-github { background: #eef3ff; color: #304e9b; border-color: #c7d3f8; }
 .provider-chip.is-gitlab { background: #fff1e6; color: #9a4418; border-color: #fdc9a5; }
 .provider-chip.is-unknown { background: var(--surface-raised); color: var(--ink-soft); border-color: var(--line); }
+.monitored-chip { background: #ecfdf5; color: #065f46; border-color: #a7f3d0; }
+
+/* ─── Toggle switch ─────────────────────────────────────────── */
+.toggle-btn {
+  position: relative;
+  width: 38px;
+  height: 22px;
+  border-radius: 11px;
+  border: 1px solid var(--line-strong);
+  background: var(--surface-raised);
+  cursor: pointer;
+  flex-shrink: 0;
+  padding: 0;
+  transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.toggle-btn:hover:not(:disabled) {
+  border-color: var(--accent-mid);
+}
+
+.toggle-btn.is-active {
+  background: #10b981;
+  border-color: #059669;
+}
+
+.toggle-btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.toggle-knob {
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+  transition: transform 0.2s ease;
+}
+
+.toggle-btn.is-active .toggle-knob {
+  transform: translateX(16px);
+}
+
+.toggle-spinner {
+  position: absolute;
+  top: 3px;
+  left: 10px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 2px solid var(--line);
+  border-top-color: var(--accent);
+  animation: spin 0.6s linear infinite;
+}
 
 /* ─── Empty state ────────────────────────────────────────────── */
 .empty {

@@ -5,6 +5,7 @@ namespace App\MessageHandler;
 use App\Entity\GithubInstallation;
 use App\Entity\UserGithubInstallation;
 use App\Message\CleanupGithubInstallationMessage;
+use App\Repository\RepoSubscriptionRepository;
 use App\Service\CacheKeys;
 use Doctrine\ORM\EntityManagerInterface;
 use Psr\Log\LoggerInterface;
@@ -18,6 +19,7 @@ final readonly class CleanupGithubInstallationMessageHandler
         private EntityManagerInterface $em,
         private LoggerInterface $logger,
         private CacheInterface $cache,
+        private RepoSubscriptionRepository $subscriptionRepo,
     ) {
     }
 
@@ -53,6 +55,9 @@ final readonly class CleanupGithubInstallationMessageHandler
             $this->em->remove($installation);
         }
 
+        // Deactivate all repo subscriptions tied to this installation
+        $deactivatedSubs = $this->subscriptionRepo->deactivateByInstallationId((string) $message->installationId);
+
         $this->em->flush();
 
         // Bust server-side caches for every affected user
@@ -66,6 +71,7 @@ final readonly class CleanupGithubInstallationMessageHandler
             'action' => $message->action,
             'delivery_id' => $message->deliveryId,
             'user_links_removed' => count($userLinks),
+            'subscriptions_deactivated' => $deactivatedSubs,
         ]);
     }
 }

@@ -41,6 +41,9 @@ class User implements UserInterface, PasswordAuthenticatedUserInterface
     #[ORM\Column(length: 100, nullable: true)]
     private ?string $githubUsername = null;
 
+    #[ORM\Column(length: 255, nullable: true)]
+    private ?string $githubAccessToken = null;
+
     #[ORM\Column]
     private bool $emailNotificationsEnabled = true;
 
@@ -162,6 +165,18 @@ class User implements UserInterface, PasswordAuthenticatedUserInterface
     public function setGithubUsername(?string $githubUsername): static
     {
         $this->githubUsername = $githubUsername;
+
+        return $this;
+    }
+
+    public function getGithubAccessToken(): ?string
+    {
+        return $this->githubAccessToken;
+    }
+
+    public function setGithubAccessToken(?string $githubAccessToken): static
+    {
+        $this->githubAccessToken = $githubAccessToken;
 
         return $this;
     }

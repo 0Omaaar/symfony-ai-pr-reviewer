@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRoute, RouterLink } from "vue-router";
 import { router } from "@/router";
 import type { PullRequest } from "@/types/pr";
+import { getRepoSubscriptions, activateSubscription, deactivateSubscription, type Subscription } from "@/api/subscriptions";
 
 const route = useRoute();
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
@@ -136,6 +137,50 @@ const newPrAlert = ref("");
 const lastSeenEventDeliveryId = ref<string | null>(null);
 let clearAlertTimeout: ReturnType<typeof setTimeout> | null = null;
 let pollInterval: ReturnType<typeof setInterval> | null = null;
+
+// Subscription state
+const branchSubscriptions = ref<Subscription[]>([]);
+const togglingBranch = ref<string | null>(null);
+
+function isBranchMonitored(branchName: string): boolean {
+    return branchSubscriptions.value.some((s) => s.branch === branchName && s.isActive);
+}
+
+function getBranchSubscription(branchName: string): Subscription | undefined {
+    return branchSubscriptions.value.find((s) => s.branch === branchName && s.isActive);
+}
+
+async function loadBranchSubscriptions() {
+    if (!repo.value) return;
+    try {
+        const data = await getRepoSubscriptions(repo.value.fullName);
+        branchSubscriptions.value = data.data;
+    } catch {
+        branchSubscriptions.value = [];
+    }
+}
+
+async function toggleBranch(branchName: string) {
+    if (!repo.value) return;
+    togglingBranch.value = branchName;
+    try {
+        if (isBranchMonitored(branchName)) {
+            await deactivateSubscription(repo.value.fullName, branchName);
+        } else {
+            await activateSubscription(
+                repo.value.fullName,
+                String(repo.value.id),
+                String(repo.value.installationId ?? ""),
+                branchName
+            );
+        }
+        await loadBranchSubscriptions();
+    } catch {
+        // subscription state will be refreshed
+    } finally {
+        togglingBranch.value = null;
+    }
+}
 
 const PR_POLL_INTERVAL_MS = 30000;
 
@@ -347,17 +392,19 @@ async function loadRepoDetails(options: { silent?: boolean } = {}) {
     }
 }
 
-onMounted(() => {
-    void loadRepoDetails();
+onMounted(async () => {
+    await loadRepoDetails();
+    void loadBranchSubscriptions();
     pollInterval = setInterval(() => {
         void loadRepoDetails({ silent: true });
     }, PR_POLL_INTERVAL_MS);
 });
 
-watch(() => route.params.id, () => {
+watch(() => route.params.id, async () => {
     lastSeenEventDeliveryId.value = null;
     dismissNewPrAlert();
-    void loadRepoDetails();
+    await loadRepoDetails();
+    void loadBranchSubscriptions();
 });
 
 onUnmounted(() => {
@@ -481,17 +528,30 @@ function goToPr(id: number) {
                 </div>
             </section>
 
-            <section class="branches-panel" aria-label="Repository branches">
-                <h2 class="section-title">Branches</h2>
+            <section class="branches-panel" aria-label="Branch monitoring">
+                <h2 class="section-title">Branch Monitoring</h2>
+                <p class="section-subtitle">Toggle monitoring for each branch. Active branches trigger email notifications and AI reviews on every PR.</p>
                 <ul v-if="branches.length > 0" class="branches-list">
                     <li v-for="branch in branches" :key="branch.name" class="branch-item">
                         <span class="sha-pill mono">{{ branch.name }}</span>
                         <span class="status-pill" :class="branch.protected ? 'is-merged' : 'is-open'">
                             {{ branch.protected ? "protected" : "unprotected" }}
                         </span>
-                        <span class="mono branch-sha">
-                            {{ branch.commitSha ? branch.commitSha.slice(0, 12) : "No SHA" }}
+                        <span v-if="isBranchMonitored(branch.name)" class="branch-status-active">
+                            Active since {{ formatDate(getBranchSubscription(branch.name)?.activatedAt ?? null) }}
                         </span>
+                        <span v-else class="branch-status-inactive">Inactive</span>
+                        <button
+                            type="button"
+                            class="toggle-btn"
+                            :class="{ 'is-active': isBranchMonitored(branch.name), 'is-loading': togglingBranch === branch.name }"
+                            :disabled="togglingBranch === branch.name"
+                            :title="isBranchMonitored(branch.name) ? 'Stop monitoring ' + branch.name : 'Start monitoring ' + branch.name"
+                            @click="toggleBranch(branch.name)"
+                        >
+                            <span v-if="togglingBranch === branch.name" class="toggle-spinner"></span>
+                            <span v-else class="toggle-knob"></span>
+                        </button>
                     </li>
                 </ul>
                 <p v-else class="section-note">No branches found.</p>
@@ -952,7 +1012,85 @@ function goToPr(id: number) {
 
 .participant-link:hover { text-decoration: underline; }
 
-.branch-sha { color: var(--ink-faint); font-size: 0.8rem; margin-left: auto; }
+.branch-sha { color: var(--ink-faint); font-size: 0.8rem; }
+
+.section-subtitle {
+    margin: -8px 0 14px;
+    color: var(--ink-soft);
+    font-size: 0.82rem;
+}
+
+.branch-status-active {
+    color: #065f46;
+    font-size: 0.78rem;
+    font-weight: 600;
+    margin-left: auto;
+    margin-right: 8px;
+}
+
+.branch-status-inactive {
+    color: var(--ink-faint);
+    font-size: 0.78rem;
+    font-weight: 600;
+    margin-left: auto;
+    margin-right: 8px;
+}
+
+/* ─── Toggle switch ─────────────────────────────────────────── */
+.toggle-btn {
+    position: relative;
+    width: 38px;
+    height: 22px;
+    border-radius: 11px;
+    border: 1px solid var(--line-strong);
+    background: var(--surface-raised);
+    cursor: pointer;
+    flex-shrink: 0;
+    padding: 0;
+    transition: background 0.2s ease, border-color 0.2s ease;
+}
+
+.toggle-btn:hover:not(:disabled) {
+    border-color: var(--accent-mid);
+}
+
+.toggle-btn.is-active {
+    background: #10b981;
+    border-color: #059669;
+}
+
+.toggle-btn:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.toggle-knob {
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+    transition: transform 0.2s ease;
+}
+
+.toggle-btn.is-active .toggle-knob {
+    transform: translateX(16px);
+}
+
+.toggle-spinner {
+    position: absolute;
+    top: 3px;
+    left: 10px;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    border: 2px solid var(--line);
+    border-top-color: var(--accent);
+    animation: spin 0.6s linear infinite;
+}
 
 /* ─── Branches ───────────────────────────────────────────────── */
 .branches-list {

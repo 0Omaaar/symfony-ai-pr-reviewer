@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref } from "vue";
 import { RouterLink, useRoute } from "vue-router";
+import { getSubscriptions } from "@/api/subscriptions";
 
 type DashboardSetup = {
   github_app_installed?: boolean;
@@ -222,8 +223,20 @@ const setupFlash = computed(() => {
   return null;
 });
 
+const activeSubscriptionCount = ref(0);
+
+async function loadSubscriptionCount() {
+  try {
+    const data = await getSubscriptions();
+    activeSubscriptionCount.value = data.count;
+  } catch {
+    activeSubscriptionCount.value = 0;
+  }
+}
+
 onMounted(() => {
   void loadDashboard();
+  void loadSubscriptionCount();
 });
 
 const setupCompletion = computed(() => {
@@ -405,6 +418,10 @@ function prStatusClass(status: "open" | "merged" | "closed") {
             <div class="kpi-card">
               <p class="kpi-label">Closed PRs</p>
               <p class="kpi-value">{{ kpis.pullRequestsClosed }}</p>
+            </div>
+            <div class="kpi-card kpi-monitored">
+              <p class="kpi-label">Branches Monitored</p>
+              <p class="kpi-value">{{ activeSubscriptionCount }}</p>
             </div>
           </div>
         </article>
@@ -953,6 +970,10 @@ function prStatusClass(status: "open" | "merged" | "closed") {
   height: 3px;
   background: linear-gradient(90deg, var(--accent), #57c3e8);
   border-radius: var(--radius-inner) var(--radius-inner) 0 0;
+}
+
+.kpi-monitored::before {
+  background: linear-gradient(90deg, #10b981, #34d399);
 }
 
 .kpi-label {

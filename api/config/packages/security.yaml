@@ -31,6 +31,13 @@ security:
             lazy: true
             provider: app_user_provider
             custom_authenticator: App\Security\GithubAuthenticator
+            remember_me:
+                secret: '%kernel.secret%'
+                lifetime: 2592000
+                path: /
+                secure: auto
+                samesite: lax
+                always_remember_me: true
             logout:
                 path: app_logout
 
@@ -53,7 +60,7 @@ security:
         - { path: ^/unsubscribe, roles: PUBLIC_ACCESS }
         - { path: ^/webhooks, roles: PUBLIC_ACCESS }
         - { path: ^/api/webhooks, roles: PUBLIC_ACCESS }
-        - { path: ^/api, roles: IS_AUTHENTICATED_FULLY }
+        - { path: ^/api, roles: IS_AUTHENTICATED_REMEMBERED }
 
 when@test:
     security:

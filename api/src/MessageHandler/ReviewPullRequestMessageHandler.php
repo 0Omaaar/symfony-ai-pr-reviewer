@@ -3,6 +3,7 @@
 namespace App\MessageHandler;
 
 use App\Message\ReviewPullRequestMessage;
+use App\Repository\RepoSubscriptionRepository;
 use App\Service\Github\GithubInstallationRepositoriesService;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\DependencyInjection\ParameterBag\ParameterBagInterface;
@@ -19,6 +20,7 @@ final readonly class ReviewPullRequestMessageHandler
     public function __construct(
         private LoggerInterface $logger,
         private GithubInstallationRepositoriesService $repositoriesService,
+        private RepoSubscriptionRepository $subscriptionRepo,
         private MailerInterface $mailer,
         private ParameterBagInterface $params,
         private Environment $twig,
@@ -36,6 +38,37 @@ final readonly class ReviewPullRequestMessageHandler
                 $message->deliveryId,
                 $message->headSha
             );
+
+            // Filter recipients by active repo+branch subscriptions (if baseBranch is available)
+            if ($message->baseBranch !== '') {
+                $subscribedUserIds = [];
+                $activeSubscriptions = $this->subscriptionRepo->findActiveByRepoAndBranch(
+                    $message->repoFullName,
+                    $message->baseBranch
+                );
+                foreach ($activeSubscriptions as $sub) {
+                    $userId = $sub->getAppUser()?->getId();
+                    if ($userId !== null) {
+                        $subscribedUserIds[$userId] = true;
+                    }
+                }
+
+                if (empty($subscribedUserIds)) {
+                    $this->logger->debug('No active subscriptions for repo+branch, skipping notifications', [
+                        'delivery_id' => $message->deliveryId,
+                        'repository' => $message->repoFullName,
+                        'base_branch' => $message->baseBranch,
+                    ]);
+
+                    return;
+                }
+
+                $recipients = array_filter($recipients, static function (array $r) use ($subscribedUserIds): bool {
+                    return isset($subscribedUserIds[$r['user_id'] ?? null]);
+                });
+                $recipients = array_values($recipients);
+            }
+
             $sentCount = $this->sendPullRequestAlertEmails($message, $recipients);
 
             $this->logger->info('Worker processed pull request webhook message', [
@@ -46,6 +79,7 @@ final readonly class ReviewPullRequestMessageHandler
                 'action' => $message->action,
                 'pr_number' => $message->prNumber,
                 'head_sha' => $message->headSha,
+                'base_branch' => $message->baseBranch,
                 'affected_users' => \count($recipients),
                 'emails_sent' => $sentCount,
             ]);
