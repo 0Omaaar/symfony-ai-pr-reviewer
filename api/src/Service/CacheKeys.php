@@ -58,4 +58,19 @@ final class CacheKeys
     {
         return \sprintf('dashboard.payload.%d', $userId);
     }
+
+    public static function teamDashboardStats(int $userId): string
+    {
+        return \sprintf('team_dashboard.stats.%d', $userId);
+    }
+
+    public static function teamDashboardLastRefresh(int $userId): string
+    {
+        return \sprintf('team_dashboard.last_refresh.%d', $userId);
+    }
+
+    public static function prSnapshotRepoList(int $userId, string $repoFullName): string
+    {
+        return \sprintf('pr_snapshot.repo.%d.%s', $userId, \hash('xxh128', $repoFullName));
+    }
 }

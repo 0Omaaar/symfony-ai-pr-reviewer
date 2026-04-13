@@ -503,6 +503,11 @@ function prStatusClass(status: "open" | "merged" | "closed") {
         </div>
 
         <div class="quick-grid">
+          <RouterLink :to="{ name: 'team-dashboard' }" class="quick-card quick-card-featured">
+            <p class="quick-badge">New</p>
+            <p class="quick-title">Team Dashboard</p>
+            <p class="quick-desc">Real-time kanban, table & focus views for all open PRs across your repos.</p>
+          </RouterLink>
           <RouterLink :to="{ name: 'repos' }" class="quick-card">
             <p class="quick-title">Repositories Hub</p>
             <p class="quick-desc">Browse repos, branches, and pull request lists.</p>
@@ -1071,7 +1076,7 @@ function prStatusClass(status: "open" | "merged" | "closed") {
 
 .quick-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
 }
 
@@ -1089,6 +1094,30 @@ function prStatusClass(status: "open" | "merged" | "closed") {
   transform: translateY(-2px);
   border-color: var(--accent-mid);
   box-shadow: var(--shadow-hover);
+}
+
+.quick-card-featured {
+  border-color: var(--accent-mid);
+  background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+  position: relative;
+}
+
+.quick-card-featured:hover {
+  border-color: var(--accent);
+  box-shadow: 0 4px 16px rgba(13,126,164,0.18);
+}
+
+.quick-badge {
+  display: inline-block;
+  margin: 0 0 6px;
+  border-radius: var(--radius-pill);
+  padding: 2px 8px;
+  font-size: 0.65rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: #fff;
+  background: var(--accent);
 }
 
 .quick-title {
@@ -1116,6 +1145,9 @@ function prStatusClass(status: "open" | "merged" | "closed") {
 /* ─── Responsive ─────────────────────────────────────────────── */
 @media (max-width: 1100px) {
   .two-cols { grid-template-columns: 1fr; }
+  .quick-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (min-width: 1101px) and (max-width: 1300px) {
   .quick-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 

@@ -124,6 +124,12 @@ class OAuthController extends AbstractController
 
             $em->flush();
 
+            // Auto-complete onboarding step: app_installed
+            if ($currentUser instanceof User) {
+                $currentUser->completeOnboardingStep('app_installed');
+                $em->flush();
+            }
+
             // Bust caches so the new installation is reflected immediately
             if ($currentUser instanceof User && $currentUser->getId() !== null) {
                 $userId = $currentUser->getId();

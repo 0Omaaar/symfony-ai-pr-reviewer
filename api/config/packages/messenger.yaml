@@ -26,3 +26,4 @@ framework:
             App\Message\ReviewPullRequestMessage: async
             App\Message\CleanupGithubInstallationMessage: async
             App\Message\ProcessPullRequestMessage: async
+            App\Message\RefreshPullRequestSnapshotsMessage: async

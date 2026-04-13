@@ -72,6 +72,7 @@ final class SubscriptionController extends AbstractController
             $existing->activate();
             $existing->setInstallationId($installationId);
             $existing->setRepoId($repoId);
+            $user->completeOnboardingStep('branch_activated');
             $this->em->flush();
 
             return $this->json([
@@ -88,6 +89,10 @@ final class SubscriptionController extends AbstractController
         $subscription->setBranch($branch);
 
         $this->em->persist($subscription);
+
+        // Auto-complete onboarding step
+        $user->completeOnboardingStep('branch_activated');
+
         $this->em->flush();
 
         return $this->json([

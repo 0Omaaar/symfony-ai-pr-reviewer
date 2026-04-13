@@ -172,6 +172,45 @@ final class GithubApiClient
         return \is_array($data) ? \count($data) : 0;
     }
 
+    public function fetchPullRequestReviews(string $installationToken, string $fullName, int $number): array
+    {
+        $response = $this->httpClient->request(
+            'GET',
+            \sprintf('https://api.github.com/repos/%s/pulls/%d/reviews?per_page=100', $fullName, $number),
+            ['headers' => $this->authHeaders($installationToken)]
+        );
+
+        $data = $response->toArray(false);
+
+        return \is_array($data) ? $data : [];
+    }
+
+    public function fetchPullRequestRequestedReviewers(string $installationToken, string $fullName, int $number): array
+    {
+        $response = $this->httpClient->request(
+            'GET',
+            \sprintf('https://api.github.com/repos/%s/pulls/%d/requested_reviewers', $fullName, $number),
+            ['headers' => $this->authHeaders($installationToken)]
+        );
+
+        $data = $response->toArray(false);
+
+        return \is_array($data) ? $data : [];
+    }
+
+    public function fetchCombinedStatus(string $installationToken, string $fullName, string $ref): array
+    {
+        $response = $this->httpClient->request(
+            'GET',
+            \sprintf('https://api.github.com/repos/%s/commits/%s/check-runs?per_page=100', $fullName, $ref),
+            ['headers' => $this->authHeaders($installationToken)]
+        );
+
+        $data = $response->toArray(false);
+
+        return \is_array($data) ? $data : [];
+    }
+
     private function extractLastPageFromLinkHeader(string $linkHeader): ?int
     {
         if (!\preg_match('/[?&]page=(\d+)>;\s*rel="last"/', $linkHeader, $matches)) {

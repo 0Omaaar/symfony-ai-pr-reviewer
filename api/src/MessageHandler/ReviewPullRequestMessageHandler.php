@@ -2,9 +2,12 @@
 
 namespace App\MessageHandler;
 
+use App\Entity\User;
 use App\Message\ReviewPullRequestMessage;
 use App\Repository\RepoSubscriptionRepository;
 use App\Service\Github\GithubInstallationRepositoriesService;
+use App\Service\PullRequest\PullRequestSnapshotService;
+use Doctrine\ORM\EntityManagerInterface;
 use Psr\Log\LoggerInterface;
 use Symfony\Component\DependencyInjection\ParameterBag\ParameterBagInterface;
 use Symfony\Component\Mailer\Exception\TransportExceptionInterface;
@@ -21,6 +24,8 @@ final readonly class ReviewPullRequestMessageHandler
         private LoggerInterface $logger,
         private GithubInstallationRepositoriesService $repositoriesService,
         private RepoSubscriptionRepository $subscriptionRepo,
+        private PullRequestSnapshotService $snapshotService,
+        private EntityManagerInterface $em,
         private MailerInterface $mailer,
         private ParameterBagInterface $params,
         private Environment $twig,
@@ -70,6 +75,37 @@ final readonly class ReviewPullRequestMessageHandler
             }
 
             $sentCount = $this->sendPullRequestAlertEmails($message, $recipients);
+
+            // Refresh PR snapshots for all affected users
+            try {
+                $refreshedUserIds = [];
+                foreach ($recipients as $r) {
+                    $uid = $r['user_id'] ?? null;
+                    if ($uid === null || isset($refreshedUserIds[$uid])) {
+                        continue;
+                    }
+                    $refreshedUserIds[$uid] = true;
+                    $userEntity = $this->em->find(User::class, $uid);
+                    if ($userEntity instanceof User) {
+                        $this->snapshotService->refreshForRepo($userEntity, $message->repoFullName, $message->installationId);
+                    }
+                }
+            } catch (\Throwable $e) {
+                $this->logger->warning('Snapshot refresh failed after webhook processing', [
+                    'delivery_id' => $message->deliveryId,
+                    'repo' => $message->repoFullName,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+
+            // If this event triggers an AI review, mark snapshot as processing
+            if (\in_array($message->action, ['opened', 'synchronize', 'ready_for_review'], true)) {
+                try {
+                    $this->snapshotService->markAiReviewProcessing($message->repoFullName, $message->prNumber);
+                } catch (\Throwable $e) {
+                    $this->logger->debug('Failed to mark AI review processing', ['error' => $e->getMessage()]);
+                }
+            }
 
             $this->logger->info('Worker processed pull request webhook message', [
                 'delivery_id' => $message->deliveryId,

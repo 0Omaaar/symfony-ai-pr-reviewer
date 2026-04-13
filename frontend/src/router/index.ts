@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from "vue-router";
 import LandingView from "@/views/LandingView.vue";
 import DashboardView from "@/views/DashboardView.vue";
+import TeamDashboardView from "@/views/TeamDashboardView.vue";
 import RepositoriesView from "@/views/RepositoriesView.vue";
 import RepositoryDetailsView from "@/views/RepositoryDetailsView.vue";
 import PrDetailsView from "@/views/PrDetailsView.vue";
@@ -27,6 +28,7 @@ export const router = createRouter({
         { path: "/", name: "landing", component: LandingView, meta: { guestOnly: true } },
         { path: "/login", name: "login", component: LoginView, meta: { guestOnly: true } },
         { path: "/dashboard", name: "dashboard", component: DashboardView, meta: { requiresAuth: true } },
+        { path: "/dashboard/team", name: "team-dashboard", component: TeamDashboardView, meta: { requiresAuth: true } },
         { path: "/repos", name: "repos", component: RepositoriesView, meta: { requiresAuth: true } },
         { path: "/repos/:id", name: "repo-details", component: RepositoryDetailsView, meta: { requiresAuth: true } },
         { path: "/pr/:id", name: "pr-details", component: PrDetailsView, meta: { requiresAuth: true } },

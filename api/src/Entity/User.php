@@ -53,6 +53,9 @@ class User implements UserInterface, PasswordAuthenticatedUserInterface
     #[ORM\Column(type: 'json', nullable: true)]
     private ?array $notificationPreferences = null;
 
+    #[ORM\Column(type: 'json', nullable: true)]
+    private ?array $onboardingState = null;
+
     #[ORM\Column(nullable: true)]
     private ?\DateTimeImmutable $createdAt = null;
 
@@ -215,6 +218,60 @@ class User implements UserInterface, PasswordAuthenticatedUserInterface
         $this->notificationPreferences = $preferences;
 
         return $this;
+    }
+
+    public function getOnboardingState(): array
+    {
+        return \array_replace_recursive(self::defaultOnboardingState(), $this->onboardingState ?? []);
+    }
+
+    public function setOnboardingState(array $state): static
+    {
+        $this->onboardingState = $state;
+
+        return $this;
+    }
+
+    public static function defaultOnboardingState(): array
+    {
+        return [
+            'completedSteps' => [],
+            'dismissedAt' => null,
+            'completedAt' => null,
+            'firstReviewReceivedAt' => null,
+        ];
+    }
+
+    public function completeOnboardingStep(string $step): static
+    {
+        $state = $this->getOnboardingState();
+        if (!\in_array($step, $state['completedSteps'], true)) {
+            $state['completedSteps'][] = $step;
+        }
+
+        $allSteps = ['github_connected', 'app_installed', 'branch_activated', 'preferences_set', 'first_review_received'];
+        if (\count(\array_intersect($allSteps, $state['completedSteps'])) === \count($allSteps) && $state['completedAt'] === null) {
+            $state['completedAt'] = (new \DateTimeImmutable())->format(\DateTimeInterface::ATOM);
+        }
+
+        $this->onboardingState = $state;
+
+        return $this;
+    }
+
+    public function isOnboardingStepComplete(string $step): bool
+    {
+        return \in_array($step, $this->getOnboardingState()['completedSteps'], true);
+    }
+
+    public function isOnboardingDismissed(): bool
+    {
+        return $this->getOnboardingState()['dismissedAt'] !== null;
+    }
+
+    public function isOnboardingComplete(): bool
+    {
+        return $this->getOnboardingState()['completedAt'] !== null;
     }
 
     public static function defaultNotificationPreferences(): array

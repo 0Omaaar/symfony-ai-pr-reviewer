@@ -2,6 +2,8 @@
 import { computed, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { clearCachedAuth, setCachedAuth } from "@/api/auth";
+import OnboardingChecklist from "@/components/OnboardingChecklist.vue";
+import { getTeamDashboardStats } from "@/api/teamDashboard";
 
 type MeResponse = {
   authenticated?: boolean;
@@ -69,13 +71,24 @@ async function logout() {
   }
 }
 
-onMounted(() => { void fetchCurrentUser(); });
+onMounted(() => {
+  void fetchCurrentUser();
+  void loadAttentionCount();
+});
 
 const isInstallDisabled = computed(() => Boolean(me.value?.authenticated) && Boolean(me.value?.githubAppInstalled));
 const isLogoutDisabled = computed(() => !Boolean(me.value?.authenticated) || isLoggingOut.value);
 
 const isAuthenticated = computed(() => Boolean(me.value?.authenticated));
 const showAppLayout = computed(() => Boolean(route.meta.requiresAuth));
+
+const needsAttentionCount = ref(0);
+async function loadAttentionCount() {
+  try {
+    const res = await getTeamDashboardStats();
+    needsAttentionCount.value = (res.data?.needsReview ?? 0);
+  } catch { /* silent */ }
+}
 
 function isActive(names: string[]) {
   return names.includes(route.name as string);
@@ -108,6 +121,14 @@ function isActive(names: string[]) {
             <svg viewBox="0 0 24 24" fill="currentColor"><path d="M3 13h8V3H3v10zm0 8h8v-6H3v6zm10 0h8V11h-8v10zm0-18v6h8V3h-8z"/></svg>
           </span>
           <span class="nav-label">Dashboard</span>
+        </RouterLink>
+
+        <RouterLink to="/dashboard/team" class="nav-link" :class="{ active: isActive(['team-dashboard']) }">
+          <span class="nav-icon">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H8V4h12v12z"/></svg>
+          </span>
+          <span class="nav-label">Team PRs</span>
+          <span v-if="needsAttentionCount > 0" class="nav-badge">{{ needsAttentionCount }}</span>
         </RouterLink>
 
         <RouterLink to="/repos" class="nav-link" :class="{ active: isActive(['repos', 'repo-details', 'pr-details']) }">
@@ -171,6 +192,8 @@ function isActive(names: string[]) {
     <main class="content">
       <RouterView />
     </main>
+
+    <OnboardingChecklist v-if="isAuthenticated" />
   </div>
 </template>
 
@@ -316,6 +339,22 @@ function isActive(names: string[]) {
 
 .nav-label {
   line-height: 1;
+}
+
+.nav-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #ef4444, #dc2626);
+  color: #ffffff;
+  font-size: 0.68rem;
+  font-weight: 800;
+  line-height: 1;
+  margin-left: auto;
 }
 
 /* ─── Spacer ─────────────────────────────────────────────────── */

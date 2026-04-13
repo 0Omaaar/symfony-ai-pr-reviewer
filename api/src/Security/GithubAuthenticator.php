@@ -80,6 +80,9 @@ class GithubAuthenticator extends OAuth2Authenticator
                 $user->setEmail($email);
                 $user->setGithubAccessToken($tokenString);
 
+                // Auto-complete onboarding step
+                $user->completeOnboardingStep('github_connected');
+
                 $this->em->persist($user);
                 $this->em->flush();
 

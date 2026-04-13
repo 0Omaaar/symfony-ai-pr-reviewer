@@ -130,6 +130,7 @@ final class AccountController extends AbstractController
         }
 
         $user->setNotificationPreferences($current);
+        $user->completeOnboardingStep('preferences_set');
         $this->em->flush();
 
         return $this->json([
