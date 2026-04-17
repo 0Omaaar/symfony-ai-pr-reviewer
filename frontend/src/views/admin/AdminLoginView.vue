@@ -1,5 +1,5 @@
 <template>
-  <div class="admin-login-page">
+  <div class="admin-login-page" data-theme="dark">
     <div class="login-card">
       <div class="logo">
         <span class="logo-icon">⚙</span>

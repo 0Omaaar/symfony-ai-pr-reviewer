@@ -733,8 +733,8 @@ function goToPr(id: number) {
     width: min(420px, calc(100vw - 24px));
     border: 1px solid var(--accent-mid);
     border-radius: var(--radius-card);
-    background: linear-gradient(135deg, #f0faff 0%, #e4f6ff 100%);
-    box-shadow: 0 12px 32px -12px rgba(13,126,164,0.45);
+    background: linear-gradient(135deg, var(--surface-gradient-a) 0%, var(--accent-bg) 100%);
+    box-shadow: var(--shadow-lg);
     padding: 14px 16px;
     display: flex;
     align-items: flex-start;
@@ -762,7 +762,7 @@ function goToPr(id: number) {
 .alert-close {
     border: 1px solid var(--accent-mid);
     border-radius: 8px;
-    background: #ffffff;
+    background: var(--surface);
     color: var(--accent-hover);
     font-weight: 700;
     font-size: 0.78rem;
@@ -796,9 +796,9 @@ function goToPr(id: number) {
 /* ─── Alert ──────────────────────────────────────────────────── */
 .alert.error {
     border-radius: var(--radius-inner);
-    border: 1px solid #fca5a5;
-    background: #fff1f2;
-    color: #991b1b;
+    border: 1px solid var(--tile-danger-line);
+    background: var(--tile-danger-bg);
+    color: var(--tile-danger-ink);
     padding: 11px 14px;
     font-size: 0.88rem;
 }
@@ -856,8 +856,8 @@ function goToPr(id: number) {
     letter-spacing: 0.03em;
 }
 
-.provider-chip.is-github { background: #eef3ff; color: #304e9b; border-color: #c7d3f8; }
-.provider-chip.is-gitlab { background: #fff1e6; color: #9a4418; border-color: #fdc9a5; }
+.provider-chip.is-github { background: var(--provider-github-bg); color: var(--provider-github-ink); border-color: var(--provider-github-line); }
+.provider-chip.is-gitlab { background: var(--provider-gitlab-bg); color: var(--provider-gitlab-ink); border-color: var(--provider-gitlab-line); }
 
 .review-chip.reviewed { color: var(--merged-ink); background: var(--merged-bg); border-color: var(--merged-line); }
 .review-chip.never    { color: var(--closed-ink); background: var(--closed-bg); border-color: var(--closed-line); }
@@ -941,7 +941,7 @@ function goToPr(id: number) {
     position: absolute;
     top: 0; left: 0; right: 0;
     height: 2px;
-    background: linear-gradient(90deg, var(--accent), #57c3e8);
+    background: linear-gradient(90deg, var(--accent), var(--accent-light));
 }
 
 .insight-label {
@@ -1021,7 +1021,7 @@ function goToPr(id: number) {
 }
 
 .branch-status-active {
-    color: #065f46;
+    color: var(--success);
     font-size: 0.78rem;
     font-weight: 600;
     margin-left: auto;
@@ -1055,8 +1055,8 @@ function goToPr(id: number) {
 }
 
 .toggle-btn.is-active {
-    background: #10b981;
-    border-color: #059669;
+    background: var(--success);
+    border-color: var(--success);
 }
 
 .toggle-btn:disabled {
@@ -1071,8 +1071,8 @@ function goToPr(id: number) {
     width: 16px;
     height: 16px;
     border-radius: 50%;
-    background: #fff;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+    background: var(--accent-foreground);
+    box-shadow: var(--shadow-sm);
     transition: transform 0.2s ease;
 }
 

@@ -1,5 +1,5 @@
 <template>
-  <div class="admin-layout">
+  <div class="admin-layout" data-theme="dark">
     <aside class="sidebar">
       <div class="brand">
         <span class="brand-icon">⚙</span>

@@ -3,6 +3,8 @@ import { computed, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { clearCachedAuth, setCachedAuth } from "@/api/auth";
 import OnboardingChecklist from "@/components/OnboardingChecklist.vue";
+import ThemeToggle from "@/components/ui/ThemeToggle.vue";
+import Toast from "@/components/ui/Toast.vue";
 import { getTeamDashboardStats } from "@/api/teamDashboard";
 
 type MeResponse = {
@@ -160,6 +162,11 @@ function isActive(names: string[]) {
         <span class="install-prompt-arrow">→</span>
       </button>
 
+      <!-- Theme toggle (always rendered in dark-tone pill against dark sidebar) -->
+      <div class="theme-toggle-row" data-theme="dark">
+        <ThemeToggle variant="compact" />
+      </div>
+
       <!-- User identity + actions -->
       <div class="user-panel">
         <template v-if="isAuthenticated && username">
@@ -195,6 +202,8 @@ function isActive(names: string[]) {
 
     <OnboardingChecklist v-if="isAuthenticated" />
   </div>
+
+  <Toast />
 </template>
 
 <style scoped>
@@ -202,7 +211,7 @@ function isActive(names: string[]) {
   display: grid;
   grid-template-columns: 256px minmax(0, 1fr);
   min-height: 100vh;
-  background: #eef3fa;
+  background: var(--page-bg);
   font-family: var(--font-sans, "Manrope", sans-serif);
 }
 
@@ -387,6 +396,14 @@ function isActive(names: string[]) {
 .install-prompt-icon { font-size: 1rem; }
 .install-prompt-text { flex: 1; }
 .install-prompt-arrow { opacity: 0.6; }
+
+/* ─── Theme toggle row ───────────────────────────────────────── */
+.theme-toggle-row {
+  display: flex;
+  justify-content: center;
+  padding: 8px 0;
+  flex-shrink: 0;
+}
 
 /* ─── User panel ─────────────────────────────────────────────── */
 .user-panel {

@@ -13,7 +13,7 @@ function scrollTo(id: string) {
 </script>
 
 <template>
-  <div class="landing">
+  <div class="landing" data-theme="light">
 
     <!-- ─── Navbar ─────────────────────────────────────────────── -->
     <header class="navbar">

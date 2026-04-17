@@ -1,42 +1,11 @@
 @import url("https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap");
 
-/* ─── Design Tokens ─────────────────────────────────────────── */
-:root {
-  /* Brand / Accent */
-  --accent:          #0d7ea4;
-  --accent-hover:    #0a6a8c;
-  --accent-light:    #e0f4fd;
-  --accent-mid:      #bae6f8;
-
-  /* Surfaces */
-  --surface:         #ffffff;
-  --surface-soft:    #f6f9fd;
-  --surface-raised:  #eef4fb;
-
-  /* Text */
-  --ink-strong:      #0c1a2e;
-  --ink-body:        #37485c;
-  --ink-soft:        #657484;
-  --ink-faint:       #a0adb9;
-
-  /* Borders */
-  --line:            #e2eaf5;
-  --line-strong:     #c5d4e8;
-
-  /* Status */
-  --open-bg:   #e8f5ff; --open-ink:   #1264a3; --open-line:   #9ecff5;
-  --merged-bg: #eaf7ed; --merged-ink: #1a6e3c; --merged-line: #96d9ae;
-  --closed-bg: #f3f5f7; --closed-ink: #526070; --closed-line: #c5cfd8;
-
-  /* Misc */
-  --radius-card:   16px;
-  --radius-inner:  10px;
-  --radius-pill:   999px;
-  --shadow-card:   0 1px 3px rgba(12,26,46,0.05), 0 6px 20px -6px rgba(12,26,46,0.08);
-  --shadow-hover:  0 4px 28px -6px rgba(12,26,46,0.14);
-  --font-sans:     "Manrope", "Nunito Sans", "Segoe UI", sans-serif;
-  --font-mono:     "JetBrains Mono", "Fira Code", Menlo, Monaco, Consolas, monospace;
-}
+/* Design tokens and base styles (theme-aware, dark + light).
+   NOTE: legacy token names (--accent, --surface, --ink-*, --line*,
+   --open-*, etc.) are now defined inside tokens.css and react to
+   [data-theme]. This file keeps only typography + scrollbar + pills
+   that existed before and still work on top of the new tokens. */
+@import "./assets/styles/base.css";
 
 /* ─── Reset ─────────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; }
@@ -49,7 +18,7 @@ body {
   font-size: 15px;
   line-height: 1.6;
   color: var(--ink-body);
-  background: #eef3fa;
+  background: var(--page-bg);
   -webkit-font-smoothing: antialiased;
 }
 

@@ -110,7 +110,7 @@ watch(isComplete, (val) => {
 
 <template>
   <Teleport to="body">
-    <div v-if="isVisible && state" class="onboarding-widget">
+    <div v-if="isVisible && state" class="onboarding-widget" data-theme="dark">
       <!-- Celebration overlay -->
       <div v-if="showCelebration" class="celebration-card">
         <div class="celebration-icon">&#127881;</div>
@@ -242,7 +242,7 @@ watch(isComplete, (val) => {
   font-size: 0.82rem;
   font-weight: 700;
   cursor: pointer;
-  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+  box-shadow: var(--shadow-md);
   transition: transform 0.15s ease;
 }
 
@@ -250,7 +250,7 @@ watch(isComplete, (val) => {
   transform: translateY(-2px);
 }
 
-.pill-check { color: #10b981; }
+.pill-check { color: var(--success); }
 .pill-arrow { font-size: 0.6rem; opacity: 0.6; }
 
 /* ─── Card ─────────────────────────────────────────── */
@@ -262,7 +262,7 @@ watch(isComplete, (val) => {
   border: 1px solid rgba(255, 255, 255, 0.1);
   background: linear-gradient(175deg, #0f1e3b 0%, #142848 100%);
   color: #d8eaf8;
-  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--shadow-lg);
   padding: 20px;
 }
 
@@ -298,7 +298,7 @@ watch(isComplete, (val) => {
   line-height: 1;
 }
 
-.close-btn:hover { color: #fca5a5; }
+.close-btn:hover { color: var(--error-light); }
 
 /* ─── Progress ─────────────────────────────────────── */
 .progress-bar-wrap {
@@ -312,7 +312,7 @@ watch(isComplete, (val) => {
 .progress-bar {
   height: 100%;
   border-radius: 3px;
-  background: linear-gradient(90deg, #10b981, #0d90c5);
+  background: linear-gradient(90deg, var(--success), var(--accent));
   transition: width 0.4s ease;
 }
 
@@ -346,7 +346,7 @@ watch(isComplete, (val) => {
   font-size: 0.85rem;
 }
 
-.check-done { color: #10b981; font-weight: 700; }
+.check-done { color: var(--success); font-weight: 700; }
 .check-pending { color: #4d6a8f; font-size: 0.9rem; }
 
 .step-content {
@@ -368,7 +368,7 @@ watch(isComplete, (val) => {
 
 .step-done-text {
   font-size: 0.74rem;
-  color: #10b981;
+  color: var(--success);
   font-weight: 600;
 }
 
@@ -381,7 +381,7 @@ watch(isComplete, (val) => {
 .step-error {
   margin: 2px 0 0;
   font-size: 0.74rem;
-  color: #fca5a5;
+  color: var(--error-light);
 }
 
 /* ─── Mini picker ──────────────────────────────────── */
@@ -403,7 +403,7 @@ watch(isComplete, (val) => {
 }
 
 .mini-select:focus, .mini-input:focus {
-  border-color: #0d90c5;
+  border-color: var(--accent);
 }
 
 .mini-select option {
@@ -438,8 +438,8 @@ watch(isComplete, (val) => {
 .btn-primary {
   padding: 10px 20px;
   font-size: 0.84rem;
-  background: linear-gradient(135deg, #10b981, #0d90c5);
-  color: #fff;
+  background: linear-gradient(135deg, var(--success), var(--accent));
+  color: var(--accent-foreground);
 }
 
 .btn-primary:hover { transform: translateY(-1px); }
@@ -456,9 +456,9 @@ watch(isComplete, (val) => {
 .btn-danger-sm {
   padding: 6px 12px;
   font-size: 0.76rem;
-  background: rgba(239, 68, 68, 0.2);
-  border: 1px solid rgba(239, 68, 68, 0.4);
-  color: #fca5a5;
+  background: color-mix(in srgb, var(--error) 20%, transparent);
+  border: 1px solid color-mix(in srgb, var(--error) 40%, transparent);
+  color: var(--error-light);
 }
 
 .btn-ghost-sm {
@@ -506,10 +506,10 @@ watch(isComplete, (val) => {
 .celebration-card {
   width: 340px;
   border-radius: 16px;
-  border: 1px solid rgba(16, 185, 129, 0.3);
+  border: 1px solid color-mix(in srgb, var(--success) 30%, transparent);
   background: linear-gradient(175deg, #0f1e3b 0%, #142848 100%);
   color: #d8eaf8;
-  box-shadow: 0 8px 40px rgba(0, 0, 0, 0.4);
+  box-shadow: var(--shadow-lg);
   padding: 24px;
   text-align: center;
 }
@@ -520,7 +520,7 @@ watch(isComplete, (val) => {
   margin: 0 0 8px;
   font-size: 1.1rem;
   font-weight: 800;
-  color: #10b981;
+  color: var(--success);
 }
 
 .celebration-text {

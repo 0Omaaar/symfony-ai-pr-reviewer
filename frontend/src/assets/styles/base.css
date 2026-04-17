@@ -1,0 +1,62 @@
+/* ============================================================
+   autoPMR Base Styles
+   ============================================================ */
+
+@import './tokens.css';
+
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+/* ---------- Color scheme hint to the UA ---------- */
+:root,
+[data-theme="dark"] { color-scheme: dark; }
+[data-theme="light"] { color-scheme: light; }
+
+/* ----------------------------------------------------------
+   Theme transition.
+   The old style.css defines a fixed body background and light
+   component colors. To avoid jarring jumps when flipping themes,
+   we apply a temporary transition to bg/text/border/shadow
+   ONLY while a theme change is in progress (class toggled by
+   the useTheme composable).
+   ---------------------------------------------------------- */
+html.theme-switching,
+html.theme-switching *,
+html.theme-switching *::before,
+html.theme-switching *::after {
+  transition: background-color var(--transition-base),
+              border-color var(--transition-base),
+              color var(--transition-base),
+              box-shadow var(--transition-base) !important;
+}
+
+/* ----------------------------------------------------------
+   Typography utilities
+   ---------------------------------------------------------- */
+.text-display { font-size: 2.5rem; font-weight: 700; line-height: 1.1; letter-spacing: -0.02em; }
+.text-h1      { font-size: 1.875rem; font-weight: 700; line-height: 1.2; letter-spacing: -0.01em; }
+.text-h2      { font-size: 1.5rem; font-weight: 600; line-height: 1.25; }
+.text-h3      { font-size: 1.25rem; font-weight: 600; line-height: 1.3; }
+.text-h4      { font-size: 1.125rem; font-weight: 600; line-height: 1.4; }
+.text-body    { font-size: 0.875rem; font-weight: 400; line-height: 1.5; }
+.text-body-sm { font-size: 0.8125rem; font-weight: 400; line-height: 1.5; }
+.text-label   { font-size: 0.75rem; font-weight: 500; letter-spacing: 0.05em; text-transform: uppercase; }
+.text-caption { font-size: 0.75rem; font-weight: 400; line-height: 1.4; }
+.text-mono    { font-family: var(--font-mono); font-size: 0.8125rem; }
+.text-mono-sm { font-family: var(--font-mono); font-size: 0.75rem; }
+
+/* ----------------------------------------------------------
+   Focus ring (uses accent token)
+   ---------------------------------------------------------- */
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* ----------------------------------------------------------
+   Selection
+   ---------------------------------------------------------- */
+::selection {
+  background: var(--accent);
+  color: var(--accent-foreground);
+}

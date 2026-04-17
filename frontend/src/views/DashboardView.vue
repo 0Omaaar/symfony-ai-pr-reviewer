@@ -543,7 +543,7 @@ function prStatusClass(status: "open" | "merged" | "closed") {
   gap: 16px;
   border: 1px solid var(--line);
   border-radius: var(--radius-card);
-  background: linear-gradient(135deg, #ffffff 0%, #f4f9ff 100%);
+  background: linear-gradient(135deg, var(--surface-gradient-a) 0%, var(--surface-gradient-b) 100%);
   padding: 20px 22px;
   box-shadow: var(--shadow-card);
 }
@@ -595,13 +595,13 @@ function prStatusClass(status: "open" | "merged" | "closed") {
 
 .action-btn.primary {
   background: var(--accent);
-  color: #ffffff;
-  box-shadow: 0 4px 12px rgba(13,126,164,0.3);
+  color: var(--accent-foreground);
+  box-shadow: var(--shadow-sm);
 }
 
 .action-btn.primary:hover {
   transform: translateY(-1px);
-  box-shadow: 0 6px 18px rgba(13,126,164,0.45);
+  box-shadow: var(--shadow-md);
 }
 
 .action-btn.secondary {
@@ -617,9 +617,9 @@ function prStatusClass(status: "open" | "merged" | "closed") {
 /* ─── Alert ──────────────────────────────────────────────────── */
 .alert {
   border-radius: var(--radius-inner);
-  border: 1px solid #fca5a5;
-  background: #fff1f2;
-  color: #991b1b;
+  border: 1px solid var(--tile-danger-line);
+  background: var(--tile-danger-bg);
+  color: var(--tile-danger-ink);
   padding: 11px 14px;
   font-size: 0.88rem;
   display: flex;
@@ -645,7 +645,7 @@ function prStatusClass(status: "open" | "merged" | "closed") {
 .onboarding-card {
   border: 1px solid var(--accent-mid);
   border-radius: var(--radius-card);
-  background: linear-gradient(135deg, #f0f9ff 0%, #e8f4fd 100%);
+  background: linear-gradient(135deg, var(--surface-gradient-a) 0%, var(--accent-bg) 100%);
   box-shadow: var(--shadow-card);
   padding: 24px 26px;
 }
@@ -707,7 +707,7 @@ function prStatusClass(status: "open" | "merged" | "closed") {
   height: 28px;
   border-radius: 50%;
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-foreground);
   font-size: 0.8rem;
   font-weight: 800;
   display: flex;
@@ -782,7 +782,7 @@ function prStatusClass(status: "open" | "merged" | "closed") {
 .filter-btn.active {
   background: var(--surface);
   color: var(--accent);
-  box-shadow: 0 1px 4px rgba(12,26,46,0.08);
+  box-shadow: var(--shadow-sm);
   font-weight: 700;
 }
 
@@ -815,7 +815,7 @@ function prStatusClass(status: "open" | "merged" | "closed") {
   margin-left: auto;
 }
 
-.filter-clear:hover { color: #b91c1c; border-color: #fca5a5; }
+.filter-clear:hover { color: var(--error); border-color: var(--tile-danger-line); }
 
 /* ─── Panel ──────────────────────────────────────────────────── */
 .panel {
@@ -891,7 +891,7 @@ function prStatusClass(status: "open" | "merged" | "closed") {
 .progress-fill {
   display: block;
   height: 100%;
-  background: linear-gradient(90deg, var(--accent), #0a6b8f);
+  background: linear-gradient(90deg, var(--accent), var(--accent-mid));
   border-radius: var(--radius-pill);
   transition: width 0.5s ease;
 }
@@ -931,9 +931,9 @@ function prStatusClass(status: "open" | "merged" | "closed") {
 }
 
 .check-state.todo {
-  background: #fffbeb;
-  color: #92400e;
-  border: 1px solid #fcd34d;
+  background: var(--tile-warning-bg);
+  color: var(--tile-warning-ink);
+  border: 1px solid var(--tile-warning-line);
 }
 
 .check-title {
@@ -973,12 +973,12 @@ function prStatusClass(status: "open" | "merged" | "closed") {
   left: 0;
   right: 0;
   height: 3px;
-  background: linear-gradient(90deg, var(--accent), #57c3e8);
+  background: linear-gradient(90deg, var(--accent), var(--accent-light));
   border-radius: var(--radius-inner) var(--radius-inner) 0 0;
 }
 
 .kpi-monitored::before {
-  background: linear-gradient(90deg, #10b981, #34d399);
+  background: linear-gradient(90deg, var(--success), var(--success-light));
 }
 
 .kpi-label {
@@ -1022,7 +1022,7 @@ function prStatusClass(status: "open" | "merged" | "closed") {
 
 .pr-item:hover, .repo-item:hover {
   border-color: var(--accent-mid);
-  box-shadow: 0 2px 8px rgba(13,126,164,0.08);
+  box-shadow: var(--shadow-sm);
 }
 
 .pr-main, .repo-main { min-width: 0; flex: 1; }
@@ -1098,13 +1098,13 @@ function prStatusClass(status: "open" | "merged" | "closed") {
 
 .quick-card-featured {
   border-color: var(--accent-mid);
-  background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+  background: linear-gradient(135deg, var(--surface-gradient-a) 0%, var(--accent-bg) 100%);
   position: relative;
 }
 
 .quick-card-featured:hover {
   border-color: var(--accent);
-  box-shadow: 0 4px 16px rgba(13,126,164,0.18);
+  box-shadow: var(--shadow-md);
 }
 
 .quick-badge {
@@ -1116,7 +1116,7 @@ function prStatusClass(status: "open" | "merged" | "closed") {
   font-weight: 800;
   text-transform: uppercase;
   letter-spacing: 0.08em;
-  color: #fff;
+  color: var(--accent-foreground);
   background: var(--accent);
 }
 

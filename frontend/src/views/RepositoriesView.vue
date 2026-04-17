@@ -333,7 +333,7 @@ function providerClass(provider: Repository["provider"]) {
   padding: 18px 22px;
   border-radius: var(--radius-card);
   border: 1px solid var(--line);
-  background: linear-gradient(135deg, #ffffff 0%, #f4f9ff 100%);
+  background: linear-gradient(135deg, var(--surface-gradient-a) 0%, var(--surface-gradient-b) 100%);
   box-shadow: var(--shadow-card);
 }
 
@@ -382,7 +382,7 @@ function providerClass(provider: Repository["provider"]) {
   border: 1px solid var(--line-strong);
   border-radius: var(--radius-inner);
   color: var(--ink-strong);
-  background: #fff;
+  background: var(--surface);
   font-size: 0.88rem;
   font-family: var(--font-sans);
   transition: border-color 180ms ease, box-shadow 180ms ease;
@@ -393,7 +393,7 @@ function providerClass(provider: Repository["provider"]) {
 .search:focus {
   outline: none;
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(13,126,164,0.12);
+  box-shadow: 0 0 0 3px var(--input-ring);
 }
 
 .results {
@@ -407,9 +407,9 @@ function providerClass(provider: Repository["provider"]) {
 /* ─── Alerts ─────────────────────────────────────────────────── */
 .alert.error {
   border-radius: var(--radius-inner);
-  border: 1px solid #fca5a5;
-  background: #fff1f2;
-  color: #991b1b;
+  border: 1px solid var(--tile-danger-line);
+  background: var(--tile-danger-bg);
+  color: var(--tile-danger-ink);
   padding: 11px 14px;
   font-size: 0.88rem;
 }
@@ -529,10 +529,10 @@ function providerClass(provider: Repository["provider"]) {
   flex-shrink: 0;
 }
 
-.provider-chip.is-github { background: #eef3ff; color: #304e9b; border-color: #c7d3f8; }
-.provider-chip.is-gitlab { background: #fff1e6; color: #9a4418; border-color: #fdc9a5; }
+.provider-chip.is-github { background: var(--provider-github-bg); color: var(--provider-github-ink); border-color: var(--provider-github-line); }
+.provider-chip.is-gitlab { background: var(--provider-gitlab-bg); color: var(--provider-gitlab-ink); border-color: var(--provider-gitlab-line); }
 .provider-chip.is-unknown { background: var(--surface-raised); color: var(--ink-soft); border-color: var(--line); }
-.monitored-chip { background: #ecfdf5; color: #065f46; border-color: #a7f3d0; }
+.monitored-chip { background: var(--monitored-bg); color: var(--monitored-ink); border-color: var(--monitored-line); }
 
 /* ─── Toggle switch ─────────────────────────────────────────── */
 .toggle-btn {
@@ -553,8 +553,8 @@ function providerClass(provider: Repository["provider"]) {
 }
 
 .toggle-btn.is-active {
-  background: #10b981;
-  border-color: #059669;
+  background: var(--success);
+  border-color: var(--success);
 }
 
 .toggle-btn:disabled {
@@ -569,8 +569,8 @@ function providerClass(provider: Repository["provider"]) {
   width: 16px;
   height: 16px;
   border-radius: 50%;
-  background: #fff;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.2);
+  background: var(--accent-foreground);
+  box-shadow: var(--shadow-sm);
   transition: transform 0.2s ease;
 }
 
