@@ -20,6 +20,15 @@ use Symfony\Contracts\Cache\ItemInterface;
 #[Route('/api/team-dashboard')]
 final class TeamDashboardController extends AbstractController
 {
+    private const OWNERSHIP_VIEWS = [
+        'all',
+        'my_authored',
+        'requesting_my_review',
+        'i_approved',
+        'blocked_by_ci',
+        'unowned',
+    ];
+
     public function __construct(
         private readonly PullRequestSnapshotRepository $snapshotRepo,
         private readonly PullRequestSnapshotService $snapshotService,
@@ -39,7 +48,7 @@ final class TeamDashboardController extends AbstractController
 
         $pullRequests = $this->snapshotRepo->findOpenByUser($user, $filters);
         $totalCount = $this->snapshotRepo->countOpenByUser($user, $filters);
-        $stats = $this->snapshotRepo->getDashboardStats($user);
+        $stats = $this->snapshotRepo->getDashboardStats($user, (string) ($filters['view'] ?? 'all'));
 
         $page = max(1, (int) ($filters['page'] ?? 1));
         $perPage = min(100, max(1, (int) ($filters['perPage'] ?? 25)));
@@ -54,10 +63,6 @@ final class TeamDashboardController extends AbstractController
         if ($groupBy !== null && \in_array($groupBy, ['repo', 'author', 'targetBranch', 'aiStatus'], true)) {
             $groups = $this->groupPullRequests($prData, $groupBy);
         }
-
-        // Add user-specific counts
-        $stats['myPRs'] = \count(array_filter($prData, fn (array $pr) => $pr['authorLogin'] === $githubUsername));
-        $stats['needsMyReview'] = \count(array_filter($prData, fn (array $pr) => $this->isUserRequestedReviewer($pr, $githubUsername)));
 
         return $this->json([
             'data' => [
@@ -75,18 +80,23 @@ final class TeamDashboardController extends AbstractController
     }
 
     #[Route('/stats', name: 'team_dashboard_stats', methods: ['GET'])]
-    public function stats(): JsonResponse
+    public function stats(Request $request): JsonResponse
     {
         $user = $this->getUser();
         if (!$user instanceof User) {
             return $this->json(['error' => 'Unauthorized'], 401);
         }
 
+        $view = $this->normalizeView($request->query->get('view'));
         $userId = $user->getId();
-        $stats = $this->cache->get(CacheKeys::teamDashboardStats((int) $userId), function (ItemInterface $item) use ($user): array {
-            $item->expiresAfter(60);
-            return $this->snapshotRepo->getDashboardStats($user);
-        });
+        if ($view === 'all') {
+            $stats = $this->cache->get(CacheKeys::teamDashboardStats((int) $userId), function (ItemInterface $item) use ($user): array {
+                $item->expiresAfter(60);
+                return $this->snapshotRepo->getDashboardStats($user);
+            });
+        } else {
+            $stats = $this->snapshotRepo->getDashboardStats($user, $view);
+        }
 
         return $this->json(['data' => $stats]);
     }
@@ -200,6 +210,7 @@ final class TeamDashboardController extends AbstractController
             'targetBranch' => $request->query->get('targetBranch'),
             'stale' => $request->query->getBoolean('stale', false),
             'ciStatus' => $request->query->get('ciStatus'),
+            'view' => $this->normalizeView($request->query->get('view')),
             'sortBy' => $request->query->get('sortBy', 'lastActivityAt'),
             'sortDir' => $request->query->get('sortDir', 'desc'),
             'page' => $request->query->getInt('page', 1),
@@ -209,22 +220,14 @@ final class TeamDashboardController extends AbstractController
 
     private function serializePr(PullRequestSnapshot $s, string $currentUsername): array
     {
-        $needsMyAttention = false;
-
-        // Current user is a requested reviewer who hasn't reviewed yet
-        if ($this->isUserRequestedReviewer(['assignedReviewers' => $s->getAssignedReviewers()], $currentUsername)) {
-            $needsMyAttention = true;
-        }
-
-        // Current user is the author and changes have been requested
-        if ($s->getAuthorLogin() === $currentUsername && $s->getReviewStatus() === 'changes_requested') {
-            $needsMyAttention = true;
-        }
-
-        // Current user is the author and CI is failing
-        if ($s->getAuthorLogin() === $currentUsername && $s->getCiStatus() === 'failure') {
-            $needsMyAttention = true;
-        }
+        $isAuthoredByMe = $s->getAuthorLogin() === $currentUsername;
+        $isRequestingMyReview = $this->isUserRequestedReviewer(['assignedReviewers' => $s->getAssignedReviewers()], $currentUsername);
+        $isApprovedByMe = $this->hasUserApproval($s->getCompletedReviews(), $currentUsername);
+        $isBlockedByCi = $s->getCiStatus() === 'failure';
+        $isUnowned = [] === $s->getAssignedReviewers() && [] === $s->getCompletedReviews();
+        $needsMyAttention = $isRequestingMyReview
+            || ($isAuthoredByMe && $s->getReviewStatus() === 'changes_requested')
+            || ($isAuthoredByMe && $isBlockedByCi);
 
         return [
             'id' => $s->getId(),
@@ -254,6 +257,11 @@ final class TeamDashboardController extends AbstractController
             'githubUrl' => $s->getGithubUrl(),
             'openedAt' => $s->getOpenedAt()?->format(\DateTimeInterface::ATOM),
             'lastActivityAt' => $s->getLastActivityAt()?->format(\DateTimeInterface::ATOM),
+            'isAuthoredByMe' => $isAuthoredByMe,
+            'isRequestingMyReview' => $isRequestingMyReview,
+            'isApprovedByMe' => $isApprovedByMe,
+            'isBlockedByCi' => $isBlockedByCi,
+            'isUnowned' => $isUnowned,
             'needsMyAttention' => $needsMyAttention,
         ];
     }
@@ -265,6 +273,25 @@ final class TeamDashboardController extends AbstractController
                 return true;
             }
         }
+        return false;
+    }
+
+    private function hasUserApproval(array $completedReviews, string $username): bool
+    {
+        if ($username === '') {
+            return false;
+        }
+
+        foreach ($completedReviews as $review) {
+            if (!\is_array($review)) {
+                continue;
+            }
+
+            if (($review['login'] ?? '') === $username && ($review['state'] ?? '') === 'APPROVED') {
+                return true;
+            }
+        }
+
         return false;
     }
 
@@ -298,5 +325,10 @@ final class TeamDashboardController extends AbstractController
                 default => 'pr_updated',
             },
         };
+    }
+
+    private function normalizeView(mixed $view): string
+    {
+        return \is_string($view) && \in_array($view, self::OWNERSHIP_VIEWS, true) ? $view : 'all';
     }
 }

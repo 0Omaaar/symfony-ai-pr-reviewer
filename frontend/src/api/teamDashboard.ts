@@ -1,5 +1,13 @@
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 
+export type OwnershipView =
+  | "all"
+  | "my_authored"
+  | "requesting_my_review"
+  | "i_approved"
+  | "blocked_by_ci"
+  | "unowned";
+
 export type PrSnapshot = {
   id: number;
   prNumber: number;
@@ -28,6 +36,11 @@ export type PrSnapshot = {
   githubUrl: string;
   openedAt: string;
   lastActivityAt: string;
+  isAuthoredByMe: boolean;
+  isRequestingMyReview: boolean;
+  isApprovedByMe: boolean;
+  isBlockedByCi: boolean;
+  isUnowned: boolean;
   needsMyAttention: boolean;
 };
 
@@ -39,6 +52,7 @@ export type DashboardStats = {
   ciFailing: number;
   myPRs?: number;
   needsMyReview?: number;
+  views?: Record<OwnershipView, number>;
 };
 
 export type DashboardResponse = {
@@ -82,8 +96,13 @@ export async function getTeamDashboard(params: Record<string, string | string[]>
   return res.json();
 }
 
-export async function getTeamDashboardStats(): Promise<{ data: DashboardStats }> {
-  const res = await fetch(`${apiBaseUrl}/api/team-dashboard/stats`, { credentials: "include" });
+export async function getTeamDashboardStats(params: { view?: OwnershipView } = {}): Promise<{ data: DashboardStats }> {
+  const url = new URL(`${apiBaseUrl}/api/team-dashboard/stats`);
+  if (params.view && params.view !== "all") {
+    url.searchParams.set("view", params.view);
+  }
+
+  const res = await fetch(url.toString(), { credentials: "include" });
   if (!res.ok) throw new Error(`Failed to fetch stats (${res.status})`);
   return res.json();
 }

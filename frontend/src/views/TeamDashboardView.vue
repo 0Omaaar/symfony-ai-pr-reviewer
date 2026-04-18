@@ -1,35 +1,59 @@
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, watch } from "vue";
-import { useRouter } from "vue-router";
+import { computed, onMounted, onUnmounted, ref, watch } from "vue";
+import { useRoute, useRouter } from "vue-router";
 import {
+  getTeamDashboardActivity,
   getTeamDashboard,
   getTeamDashboardStats,
-  getTeamDashboardActivity,
-  getTeamDashboardPrDetail,
   refreshTeamDashboard,
-  type PrSnapshot,
-  type DashboardStats,
   type ActivityEvent,
+  type DashboardStats,
+  type OwnershipView,
+  type PrSnapshot,
 } from "@/api/teamDashboard";
 import { getSubscriptions } from "@/api/subscriptions";
 
-const router = useRouter();
+const ownershipViewMeta: Record<OwnershipView, { label: string; empty: string }> = {
+  all: { label: "All Open PRs", empty: "No pull requests match your current filters." },
+  my_authored: { label: "My Authored PRs", empty: "No authored pull requests match your current filters." },
+  requesting_my_review: { label: "PRs Requesting My Review", empty: "No pull requests are currently requesting your review." },
+  i_approved: { label: "PRs I Approved", empty: "No open pull requests that you approved match your current filters." },
+  blocked_by_ci: { label: "PRs Blocked By CI", empty: "No open pull requests blocked by CI match your current filters." },
+  unowned: { label: "PRs Nobody Owns", empty: "No unowned pull requests match your current filters." },
+};
 
-// State
+const ownershipViews = Object.keys(ownershipViewMeta) as OwnershipView[];
+
+const router = useRouter();
+const route = useRoute();
+
 const pullRequests = ref<PrSnapshot[]>([]);
-const stats = ref<DashboardStats>({ totalOpen: 0, needsReview: 0, stale: 0, aiReviewed: 0, ciFailing: 0 });
+const stats = ref<DashboardStats>({
+  totalOpen: 0,
+  needsReview: 0,
+  stale: 0,
+  aiReviewed: 0,
+  ciFailing: 0,
+  views: {
+    all: 0,
+    my_authored: 0,
+    requesting_my_review: 0,
+    i_approved: 0,
+    blocked_by_ci: 0,
+    unowned: 0,
+  },
+});
 const pagination = ref({ total: 0, page: 1, perPage: 25, totalPages: 1 });
 const isLoading = ref(true);
 const loadError = ref("");
 const lastRefreshed = ref<Date | null>(null);
 const isRefreshing = ref(false);
 const hasSubscriptions = ref(true);
+const activeView = ref<OwnershipView>(normalizeOwnershipView(route.query.view));
 
-// Layout
 type Layout = "table" | "kanban" | "focus";
 const layout = ref<Layout>("table");
 
-// Filters
 const filterRepo = ref("");
 const filterAuthor = ref("");
 const filterStatus = ref("open");
@@ -37,41 +61,58 @@ const filterReviewStatus = ref("");
 const filterAiStatus = ref("");
 const filterCiStatus = ref("");
 const filterStaleOnly = ref(false);
-const filterMyPRsOnly = ref(false);
 const filterNeedsAttention = ref(false);
 const sortBy = ref("lastActivityAt");
 const sortDir = ref("desc");
 const searchQuery = ref("");
 
-// Sidebar
 const selectedPr = ref<PrSnapshot | null>(null);
 const isSidebarOpen = ref(false);
-const sidebarLoading = ref(false);
 
-// Activity feed
 const activityEvents = ref<ActivityEvent[]>([]);
 const showActivity = ref(false);
 
-// Auto-refresh
 let statsInterval: ReturnType<typeof setInterval> | null = null;
 let prevStatsHash = "";
 
-// Computed
 const filteredPRs = computed(() => {
   let items = pullRequests.value;
   const q = searchQuery.value.trim().toLowerCase();
   if (q) {
     items = items.filter((pr) => pr.title.toLowerCase().includes(q) || pr.repoFullName.toLowerCase().includes(q));
   }
-  if (filterMyPRsOnly.value) {
-    // myPRs filter is handled by local filtering since we don't have current username easily
-    // Stats-level filter; server already handles author filter
-  }
   if (filterNeedsAttention.value) {
     items = items.filter((pr) => pr.needsMyAttention);
   }
   return items;
 });
+
+const ownershipViewOptions = computed(() =>
+  ownershipViews.map((view) => ({
+    value: view,
+    label: ownershipViewMeta[view].label,
+    count: stats.value.views?.[view] ?? 0,
+  }))
+);
+
+const activeViewLabel = computed(() => ownershipViewMeta[activeView.value].label);
+const emptyResultsText = computed(() => ownershipViewMeta[activeView.value].empty);
+const focusEmptyHeading = computed(() =>
+  activeView.value === "all" ? "You're all caught up" : `No PRs in ${activeViewLabel.value}`
+);
+const focusEmptyText = computed(() =>
+  activeView.value === "all"
+    ? "No pull requests need your attention right now."
+    : ownershipViewMeta[activeView.value].empty
+);
+const isBaseMetricsView = computed(
+  () =>
+    filterStatus.value === "open" &&
+    !filterReviewStatus.value &&
+    !filterStaleOnly.value &&
+    !filterCiStatus.value &&
+    !filterAiStatus.value
+);
 
 const kanbanColumns = computed(() => ({
   needsReview: filteredPRs.value.filter((pr) => pr.reviewStatus === "none" || pr.reviewStatus === "review_requested"),
@@ -93,6 +134,13 @@ const refreshAgoText = computed(() => {
   return `${minutes}m ago`;
 });
 
+function normalizeOwnershipView(raw: unknown): OwnershipView {
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  return typeof value === "string" && ownershipViews.includes(value as OwnershipView)
+    ? (value as OwnershipView)
+    : "all";
+}
+
 // Data loading
 async function loadDashboard() {
   isLoading.value = true;
@@ -105,6 +153,7 @@ async function loadDashboard() {
       page: String(pagination.value.page),
       perPage: String(pagination.value.perPage),
     };
+    if (activeView.value !== "all") params.view = activeView.value;
     if (filterRepo.value) params["repos[]"] = filterRepo.value;
     if (filterAuthor.value) params["authors[]"] = filterAuthor.value;
     if (filterReviewStatus.value) params.reviewStatus = filterReviewStatus.value;
@@ -115,6 +164,7 @@ async function loadDashboard() {
     const res = await getTeamDashboard(params);
     pullRequests.value = res.data.pullRequests;
     stats.value = res.data.stats;
+    prevStatsHash = JSON.stringify(res.data.stats);
     pagination.value = res.data.pagination;
     lastRefreshed.value = new Date();
   } catch (e) {
@@ -126,7 +176,7 @@ async function loadDashboard() {
 
 async function pollStats() {
   try {
-    const res = await getTeamDashboardStats();
+    const res = await getTeamDashboardStats({ view: activeView.value });
     const hash = JSON.stringify(res.data);
     if (hash !== prevStatsHash) {
       prevStatsHash = hash;
@@ -171,9 +221,26 @@ function goToOnboarding() {
   router.push({ name: "repos" });
 }
 
-// Filter by clicking a stat
+function applyOwnershipView(view: OwnershipView) {
+  if (view === activeView.value) {
+    return;
+  }
+
+  activeView.value = view;
+  pagination.value.page = 1;
+
+  const nextQuery = { ...route.query };
+  if (view === "all") {
+    delete nextQuery.view;
+  } else {
+    nextQuery.view = view;
+  }
+
+  void router.replace({ query: nextQuery });
+  void loadDashboard();
+}
+
 function applyStatFilter(filter: string) {
-  // Reset filters
   filterReviewStatus.value = "";
   filterAiStatus.value = "";
   filterCiStatus.value = "";
@@ -206,7 +273,6 @@ function clearFilters() {
   filterAiStatus.value = "";
   filterCiStatus.value = "";
   filterStaleOnly.value = false;
-  filterMyPRsOnly.value = false;
   filterNeedsAttention.value = false;
   searchQuery.value = "";
   sortBy.value = "lastActivityAt";
@@ -276,6 +342,20 @@ watch([filterRepo, filterAuthor, filterStatus, filterReviewStatus, filterAiStatu
   void loadDashboard();
 });
 
+watch(
+  () => route.query.view,
+  (rawView) => {
+    const normalized = normalizeOwnershipView(rawView);
+    if (normalized === activeView.value) {
+      return;
+    }
+
+    activeView.value = normalized;
+    pagination.value.page = 1;
+    void loadDashboard();
+  }
+);
+
 onMounted(async () => {
   // Check if user has subscriptions
   try {
@@ -308,9 +388,22 @@ onUnmounted(() => {
     </div>
 
     <template v-else>
+      <div class="view-switcher">
+        <button
+          v-for="option in ownershipViewOptions"
+          :key="option.value"
+          class="view-chip"
+          :class="{ active: activeView === option.value }"
+          @click="applyOwnershipView(option.value)"
+        >
+          <span class="view-chip-label">{{ option.label }}</span>
+          <span class="view-chip-count">{{ option.count }}</span>
+        </button>
+      </div>
+
       <!-- Metrics bar -->
       <div class="metrics-bar">
-        <button class="metric" :class="{ active: filterStatus === 'open' && !filterReviewStatus && !filterStaleOnly && !filterCiStatus && !filterAiStatus }" @click="clearFilters">
+        <button class="metric" :class="{ active: isBaseMetricsView }" @click="clearFilters">
           <span class="metric-number">{{ stats.totalOpen }}</span>
           <span class="metric-label">Open</span>
         </button>
@@ -435,7 +528,7 @@ onUnmounted(() => {
               </tr>
             </tbody>
           </table>
-          <div v-else class="no-results">No pull requests match your filters.</div>
+          <div v-else class="no-results">{{ emptyResultsText }}</div>
         </div>
 
         <!-- Pagination -->
@@ -476,8 +569,8 @@ onUnmounted(() => {
         <div class="focus-view">
           <div v-if="focusItems.actionNeeded.length === 0 && focusItems.waitingOnOthers.length === 0" class="focus-empty">
             <div class="focus-empty-icon">&#127881;</div>
-            <h3>You're all caught up</h3>
-            <p>No pull requests need your attention right now.</p>
+            <h3>{{ focusEmptyHeading }}</h3>
+            <p>{{ focusEmptyText }}</p>
           </div>
 
           <template v-else>
@@ -500,7 +593,7 @@ onUnmounted(() => {
             </section>
 
             <section v-if="focusItems.waitingOnOthers.length > 0" class="focus-section">
-              <h3 class="focus-section-title">Waiting on others (your PRs)</h3>
+              <h3 class="focus-section-title">Waiting on others</h3>
               <div class="focus-cards">
                 <div v-for="pr in focusItems.waitingOnOthers" :key="pr.id" class="focus-card" @click="openSidebar(pr)">
                   <div class="fc-top">
@@ -637,6 +730,61 @@ onUnmounted(() => {
 }
 
 /* ─── Metrics bar ─────────────────────────────────── */
+.view-switcher {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px 16px;
+  border-radius: var(--radius-card, 16px);
+  border: 1px solid var(--line, #e2e8f0);
+  background: var(--surface, #fff);
+  box-shadow: var(--shadow-card, 0 1px 3px rgba(0,0,0,0.06));
+}
+
+.view-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  border: 1px solid var(--line-strong, #cbd5e1);
+  background: var(--surface-soft, #f8fafc);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  color: var(--ink-body, #334155);
+  font-family: inherit;
+}
+
+.view-chip:hover {
+  border-color: var(--accent-mid, #7dccf0);
+  background: var(--accent-light, #e0f4ff);
+}
+
+.view-chip.active {
+  border-color: var(--accent-mid, #7dccf0);
+  background: var(--accent-light, #e0f4ff);
+  color: var(--accent, #0d90c5);
+}
+
+.view-chip-label {
+  font-size: 0.82rem;
+  font-weight: 700;
+}
+
+.view-chip-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 24px;
+  height: 24px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: var(--surface, #fff);
+  color: var(--ink-strong, #1e293b);
+  font-size: 0.74rem;
+  font-weight: 800;
+}
+
 .metrics-bar {
   display: flex;
   align-items: center;
