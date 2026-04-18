@@ -107,6 +107,7 @@ const focusEmptyText = computed(() =>
 );
 const isBaseMetricsView = computed(
   () =>
+    activeView.value === "all" &&
     filterStatus.value === "open" &&
     !filterReviewStatus.value &&
     !filterStaleOnly.value &&
@@ -240,6 +241,18 @@ function applyOwnershipView(view: OwnershipView) {
   void loadDashboard();
 }
 
+function resetOwnershipView() {
+  if (activeView.value === "all") {
+    return;
+  }
+
+  activeView.value = "all";
+
+  const nextQuery = { ...route.query };
+  delete nextQuery.view;
+  void router.replace({ query: nextQuery });
+}
+
 function applyStatFilter(filter: string) {
   filterReviewStatus.value = "";
   filterAiStatus.value = "";
@@ -266,6 +279,7 @@ function applyStatFilter(filter: string) {
 }
 
 function clearFilters() {
+  resetOwnershipView();
   filterRepo.value = "";
   filterAuthor.value = "";
   filterStatus.value = "open";

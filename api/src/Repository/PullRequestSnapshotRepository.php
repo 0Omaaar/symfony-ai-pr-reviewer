@@ -7,7 +7,8 @@ namespace App\Repository;
 use App\Entity\PullRequestSnapshot;
 use App\Entity\User;
 use Doctrine\Bundle\DoctrineBundle\Repository\ServiceEntityRepository;
-use Doctrine\ORM\QueryBuilder;
+use Doctrine\DBAL\ArrayParameterType;
+use Doctrine\DBAL\ParameterType;
 use Doctrine\Persistence\ManagerRegistry;
 
 /**
@@ -24,6 +25,8 @@ class PullRequestSnapshotRepository extends ServiceEntityRepository
         'unowned',
     ];
 
+    private const OPEN_STATUSES = ['open', 'draft'];
+
     public function __construct(ManagerRegistry $registry)
     {
         parent::__construct($registry, PullRequestSnapshot::class);
@@ -34,16 +37,57 @@ class PullRequestSnapshotRepository extends ServiceEntityRepository
      */
     public function findOpenByUser(User $user, array $filters = []): array
     {
-        $snapshots = $this->getFilteredSnapshots($user, $filters);
+        [$whereSql, $params, $types] = $this->buildListWhereClause($user, $filters);
+
         $page = max(1, (int) ($filters['page'] ?? 1));
         $perPage = min(100, max(1, (int) ($filters['perPage'] ?? 25)));
 
-        return \array_slice($snapshots, ($page - 1) * $perPage, $perPage);
+        $params['limit'] = $perPage;
+        $params['offset'] = ($page - 1) * $perPage;
+        $types['limit'] = ParameterType::INTEGER;
+        $types['offset'] = ParameterType::INTEGER;
+
+        $sql = \sprintf(
+            'SELECT id FROM pull_request_snapshot WHERE %s ORDER BY %s LIMIT :limit OFFSET :offset',
+            $whereSql,
+            $this->buildOrderByClause($filters),
+        );
+
+        $ids = \array_map('intval', $this->getEntityManager()->getConnection()->fetchFirstColumn($sql, $params, $types));
+        if ([] === $ids) {
+            return [];
+        }
+
+        $snapshots = $this->createQueryBuilder('s')
+            ->andWhere('s.id IN (:ids)')
+            ->setParameter('ids', $ids)
+            ->getQuery()
+            ->getResult();
+
+        $snapshotsById = [];
+        foreach ($snapshots as $snapshot) {
+            if ($snapshot instanceof PullRequestSnapshot && $snapshot->getId() !== null) {
+                $snapshotsById[$snapshot->getId()] = $snapshot;
+            }
+        }
+
+        $orderedSnapshots = [];
+        foreach ($ids as $id) {
+            if (isset($snapshotsById[$id])) {
+                $orderedSnapshots[] = $snapshotsById[$id];
+            }
+        }
+
+        return $orderedSnapshots;
     }
 
     public function countOpenByUser(User $user, array $filters = []): int
     {
-        return \count($this->getFilteredSnapshots($user, $filters));
+        [$whereSql, $params, $types] = $this->buildListWhereClause($user, $filters);
+
+        $sql = \sprintf('SELECT COUNT(*) FROM pull_request_snapshot WHERE %s', $whereSql);
+
+        return (int) $this->getEntityManager()->getConnection()->fetchOne($sql, $params, $types);
     }
 
     /**
@@ -71,7 +115,7 @@ class PullRequestSnapshotRepository extends ServiceEntityRepository
             ->andWhere('s.isStale = true')
             ->andWhere('s.status IN (:statuses)')
             ->setParameter('user', $user)
-            ->setParameter('statuses', ['open', 'draft'])
+            ->setParameter('statuses', self::OPEN_STATUSES)
             ->orderBy('s.lastActivityAt', 'ASC')
             ->getQuery()
             ->getResult();
@@ -101,37 +145,108 @@ class PullRequestSnapshotRepository extends ServiceEntityRepository
             ->andWhere('s.status IN (:statuses)')
             ->andWhere('s.isStale = false')
             ->setParameter('threshold', $threshold)
-            ->setParameter('statuses', ['open', 'draft'])
+            ->setParameter('statuses', self::OPEN_STATUSES)
             ->getQuery()
             ->execute();
     }
 
     public function getDashboardStats(User $user, string $view = 'all'): array
     {
-        $allSnapshots = $this->getFilteredSnapshots($user, ['status' => 'open']);
+        $conn = $this->getEntityManager()->getConnection();
+        $username = $user->getGithubUsername() ?? '';
         $view = $this->normalizeView($view);
-        $viewSnapshots = $view === 'all'
-            ? $allSnapshots
-            : \array_values(\array_filter(
-                $allSnapshots,
-                fn (PullRequestSnapshot $snapshot): bool => $this->matchesOwnershipView($snapshot, $view, $user)
-            ));
+
+        $params = [
+            'userId' => (int) $user->getId(),
+            'openStatuses' => self::OPEN_STATUSES,
+            'githubUsername' => $username,
+        ];
+        $types = [
+            'openStatuses' => ArrayParameterType::STRING,
+        ];
+
+        [$viewClause, $viewParams, $viewTypes] = $this->buildOwnershipClause($view, $username, 'selectedView');
+
+        $selectedStatsSql = <<<'SQL'
+            SELECT
+                COUNT(*) AS total_open,
+                COUNT(*) FILTER (WHERE review_status = 'review_requested') AS needs_review,
+                COUNT(*) FILTER (WHERE is_stale = true) AS stale,
+                COUNT(*) FILTER (WHERE ai_review_status = 'completed') AS ai_reviewed,
+                COUNT(*) FILTER (WHERE ci_status = 'failure') AS ci_failing,
+                COUNT(*) FILTER (WHERE author_login = :githubUsername) AS my_prs,
+                COUNT(*) FILTER (
+                    WHERE EXISTS (
+                        SELECT 1
+                        FROM json_array_elements(assigned_reviewers) reviewer
+                        WHERE reviewer->>'login' = :githubUsername
+                    )
+                ) AS needs_my_review
+            FROM pull_request_snapshot
+            WHERE app_user_id = :userId
+              AND status IN (:openStatuses)
+        SQL;
+
+        if ($viewClause !== null) {
+            $selectedStatsSql .= ' AND ' . $viewClause;
+            $params = [...$params, ...$viewParams];
+            $types = [...$types, ...$viewTypes];
+        }
+
+        $selectedRow = $conn->fetchAssociative($selectedStatsSql, $params, $types) ?: [];
+
+        $viewsSql = <<<'SQL'
+            SELECT
+                COUNT(*) AS all_count,
+                COUNT(*) FILTER (WHERE author_login = :githubUsername) AS my_authored_count,
+                COUNT(*) FILTER (
+                    WHERE EXISTS (
+                        SELECT 1
+                        FROM json_array_elements(assigned_reviewers) reviewer
+                        WHERE reviewer->>'login' = :githubUsername
+                    )
+                ) AS requesting_my_review_count,
+                COUNT(*) FILTER (
+                    WHERE EXISTS (
+                        SELECT 1
+                        FROM json_array_elements(completed_reviews) review
+                        WHERE review->>'login' = :githubUsername
+                          AND review->>'state' = 'APPROVED'
+                    )
+                ) AS i_approved_count,
+                COUNT(*) FILTER (WHERE ci_status = 'failure') AS blocked_by_ci_count,
+                COUNT(*) FILTER (
+                    WHERE json_array_length(assigned_reviewers) = 0
+                      AND json_array_length(completed_reviews) = 0
+                ) AS unowned_count
+            FROM pull_request_snapshot
+            WHERE app_user_id = :userId
+              AND status IN (:openStatuses)
+        SQL;
+
+        $viewsRow = $conn->fetchAssociative($viewsSql, [
+            'userId' => (int) $user->getId(),
+            'openStatuses' => self::OPEN_STATUSES,
+            'githubUsername' => $username,
+        ], [
+            'openStatuses' => ArrayParameterType::STRING,
+        ]) ?: [];
 
         return [
-            'totalOpen' => \count($viewSnapshots),
-            'needsReview' => $this->countMatching($viewSnapshots, static fn (PullRequestSnapshot $snapshot): bool => $snapshot->getReviewStatus() === 'review_requested'),
-            'stale' => $this->countMatching($viewSnapshots, static fn (PullRequestSnapshot $snapshot): bool => $snapshot->isStale()),
-            'aiReviewed' => $this->countMatching($viewSnapshots, static fn (PullRequestSnapshot $snapshot): bool => $snapshot->getAiReviewStatus() === 'completed'),
-            'ciFailing' => $this->countMatching($viewSnapshots, static fn (PullRequestSnapshot $snapshot): bool => $snapshot->getCiStatus() === 'failure'),
-            'myPRs' => $this->countMatching($viewSnapshots, fn (PullRequestSnapshot $snapshot): bool => $snapshot->getAuthorLogin() === ($user->getGithubUsername() ?? '')),
-            'needsMyReview' => $this->countMatching($viewSnapshots, fn (PullRequestSnapshot $snapshot): bool => $this->isUserRequestedReviewer($snapshot->getAssignedReviewers(), $user->getGithubUsername() ?? '')),
+            'totalOpen' => (int) ($selectedRow['total_open'] ?? 0),
+            'needsReview' => (int) ($selectedRow['needs_review'] ?? 0),
+            'stale' => (int) ($selectedRow['stale'] ?? 0),
+            'aiReviewed' => (int) ($selectedRow['ai_reviewed'] ?? 0),
+            'ciFailing' => (int) ($selectedRow['ci_failing'] ?? 0),
+            'myPRs' => (int) ($selectedRow['my_prs'] ?? 0),
+            'needsMyReview' => (int) ($selectedRow['needs_my_review'] ?? 0),
             'views' => [
-                'all' => \count($allSnapshots),
-                'my_authored' => $this->countMatching($allSnapshots, fn (PullRequestSnapshot $snapshot): bool => $this->matchesOwnershipView($snapshot, 'my_authored', $user)),
-                'requesting_my_review' => $this->countMatching($allSnapshots, fn (PullRequestSnapshot $snapshot): bool => $this->matchesOwnershipView($snapshot, 'requesting_my_review', $user)),
-                'i_approved' => $this->countMatching($allSnapshots, fn (PullRequestSnapshot $snapshot): bool => $this->matchesOwnershipView($snapshot, 'i_approved', $user)),
-                'blocked_by_ci' => $this->countMatching($allSnapshots, fn (PullRequestSnapshot $snapshot): bool => $this->matchesOwnershipView($snapshot, 'blocked_by_ci', $user)),
-                'unowned' => $this->countMatching($allSnapshots, fn (PullRequestSnapshot $snapshot): bool => $this->matchesOwnershipView($snapshot, 'unowned', $user)),
+                'all' => (int) ($viewsRow['all_count'] ?? 0),
+                'my_authored' => (int) ($viewsRow['my_authored_count'] ?? 0),
+                'requesting_my_review' => (int) ($viewsRow['requesting_my_review_count'] ?? 0),
+                'i_approved' => (int) ($viewsRow['i_approved_count'] ?? 0),
+                'blocked_by_ci' => (int) ($viewsRow['blocked_by_ci_count'] ?? 0),
+                'unowned' => (int) ($viewsRow['unowned_count'] ?? 0),
             ],
         ];
     }
@@ -149,7 +264,7 @@ class PullRequestSnapshotRepository extends ServiceEntityRepository
                 ->setParameter('closed', 'closed')
                 ->setParameter('user', $user)
                 ->setParameter('repo', $repoFullName)
-                ->setParameter('statuses', ['open', 'draft'])
+                ->setParameter('statuses', self::OPEN_STATUSES)
                 ->getQuery()
                 ->execute();
         }
@@ -164,166 +279,143 @@ class PullRequestSnapshotRepository extends ServiceEntityRepository
             ->setParameter('closed', 'closed')
             ->setParameter('user', $user)
             ->setParameter('repo', $repoFullName)
-            ->setParameter('statuses', ['open', 'draft'])
+            ->setParameter('statuses', self::OPEN_STATUSES)
             ->setParameter('openPrs', $openPrNumbers)
             ->getQuery()
             ->execute();
     }
 
     /**
-     * @return PullRequestSnapshot[]
+     * @return array{0: string, 1: array<string, mixed>, 2: array<string, mixed>}
      */
-    private function getFilteredSnapshots(User $user, array $filters = []): array
+    private function buildListWhereClause(User $user, array $filters): array
     {
-        $qb = $this->createQueryBuilder('s')
-            ->andWhere('s.appUser = :user')
-            ->setParameter('user', $user);
+        $view = $this->normalizeView((string) ($filters['view'] ?? 'all'));
+        $statusFilter = $view === 'all' ? (string) ($filters['status'] ?? 'open') : 'open';
 
-        $this->applyStandardFilters($qb, $filters);
-        $this->applySorting($qb, $filters);
-
-        $snapshots = $qb->getQuery()->getResult();
-        $view = $this->normalizeView($filters['view'] ?? 'all');
-        if ($view === 'all') {
-            return $snapshots;
-        }
-
-        return \array_values(\array_filter(
-            $snapshots,
-            fn (PullRequestSnapshot $snapshot): bool => $this->matchesOwnershipView($snapshot, $view, $user)
-        ));
-    }
-
-    private function applyStandardFilters(QueryBuilder $qb, array $filters): void
-    {
-        $view = $this->normalizeView($filters['view'] ?? 'all');
-        $statusFilter = $view === 'all' ? ($filters['status'] ?? 'open') : 'open';
+        $where = ['app_user_id = :userId'];
+        $params = ['userId' => (int) $user->getId()];
+        $types = [];
 
         if ($statusFilter === 'open') {
-            $qb->andWhere('s.status IN (:statuses)')
-                ->setParameter('statuses', ['open', 'draft']);
+            $where[] = 'status IN (:statuses)';
+            $params['statuses'] = self::OPEN_STATUSES;
+            $types['statuses'] = ArrayParameterType::STRING;
         } elseif ($statusFilter !== 'all') {
-            $qb->andWhere('s.status = :status')
-                ->setParameter('status', $statusFilter);
+            $where[] = 'status = :status';
+            $params['status'] = $statusFilter;
         }
 
-        if (!empty($filters['repos'])) {
-            $qb->andWhere('s.repoFullName IN (:repos)')
-                ->setParameter('repos', $filters['repos']);
+        $repos = \array_values(\array_filter((array) ($filters['repos'] ?? []), static fn (mixed $value): bool => \is_string($value) && $value !== ''));
+        if ([] !== $repos) {
+            $where[] = 'repo_full_name IN (:repos)';
+            $params['repos'] = $repos;
+            $types['repos'] = ArrayParameterType::STRING;
         }
 
-        if (!empty($filters['authors'])) {
-            $qb->andWhere('s.authorLogin IN (:authors)')
-                ->setParameter('authors', $filters['authors']);
+        $authors = \array_values(\array_filter((array) ($filters['authors'] ?? []), static fn (mixed $value): bool => \is_string($value) && $value !== ''));
+        if ([] !== $authors) {
+            $where[] = 'author_login IN (:authors)';
+            $params['authors'] = $authors;
+            $types['authors'] = ArrayParameterType::STRING;
         }
 
-        if (!empty($filters['reviewStatus'])) {
-            $qb->andWhere('s.reviewStatus = :reviewStatus')
-                ->setParameter('reviewStatus', $filters['reviewStatus']);
+        if (\is_string($filters['reviewStatus'] ?? null) && $filters['reviewStatus'] !== '') {
+            $where[] = 'review_status = :reviewStatus';
+            $params['reviewStatus'] = $filters['reviewStatus'];
         }
 
-        if (!empty($filters['targetBranch'])) {
-            $qb->andWhere('s.targetBranch = :targetBranch')
-                ->setParameter('targetBranch', $filters['targetBranch']);
+        if (\is_string($filters['targetBranch'] ?? null) && $filters['targetBranch'] !== '') {
+            $where[] = 'target_branch = :targetBranch';
+            $params['targetBranch'] = $filters['targetBranch'];
         }
 
-        if (isset($filters['stale']) && $filters['stale']) {
-            $qb->andWhere('s.isStale = true');
+        if (($filters['stale'] ?? false) === true) {
+            $where[] = 'is_stale = true';
         }
 
-        if (!empty($filters['ciStatus'])) {
-            $qb->andWhere('s.ciStatus = :ciStatus')
-                ->setParameter('ciStatus', $filters['ciStatus']);
+        if (\is_string($filters['ciStatus'] ?? null) && $filters['ciStatus'] !== '') {
+            $where[] = 'ci_status = :ciStatus';
+            $params['ciStatus'] = $filters['ciStatus'];
         }
 
-        if (!empty($filters['aiStatus'])) {
-            match ($filters['aiStatus']) {
-                'has_issues' => $qb->andWhere('s.aiReviewStatus = :aiStatus AND s.aiIssueCount > 0')
-                    ->setParameter('aiStatus', 'completed'),
-                default => $qb->andWhere('s.aiReviewStatus = :aiStatus')
-                    ->setParameter('aiStatus', $filters['aiStatus']),
-            };
+        if (\is_string($filters['aiStatus'] ?? null) && $filters['aiStatus'] !== '') {
+            if ($filters['aiStatus'] === 'has_issues') {
+                $where[] = 'ai_review_status = :aiCompletedStatus AND ai_issue_count > 0';
+                $params['aiCompletedStatus'] = 'completed';
+            } else {
+                $where[] = 'ai_review_status = :aiStatus';
+                $params['aiStatus'] = $filters['aiStatus'];
+            }
         }
+
+        [$ownershipClause, $ownershipParams, $ownershipTypes] = $this->buildOwnershipClause($view, $user->getGithubUsername() ?? '', 'ownership');
+        if ($ownershipClause !== null) {
+            $where[] = $ownershipClause;
+            $params = [...$params, ...$ownershipParams];
+            $types = [...$types, ...$ownershipTypes];
+        }
+
+        return [\implode(' AND ', $where), $params, $types];
     }
 
-    private function applySorting(QueryBuilder $qb, array $filters): void
+    private function buildOrderByClause(array $filters): string
     {
         $sortBy = $filters['sortBy'] ?? 'lastActivityAt';
-        $sortDir = strtoupper($filters['sortDir'] ?? 'DESC');
-        $validSorts = ['openedAt', 'lastActivityAt', 'prNumber', 'commentCount'];
-        if (!\in_array($sortBy, $validSorts, true)) {
-            $sortBy = 'lastActivityAt';
-        }
+        $sortDir = \strtoupper((string) ($filters['sortDir'] ?? 'DESC'));
+
+        $column = match ($sortBy) {
+            'openedAt' => 'opened_at',
+            'prNumber' => 'pr_number',
+            'commentCount' => 'comment_count',
+            default => 'last_activity_at',
+        };
+
         if (!\in_array($sortDir, ['ASC', 'DESC'], true)) {
             $sortDir = 'DESC';
         }
 
-        $qb->orderBy('s.' . $sortBy, $sortDir);
-    }
-
-    private function matchesOwnershipView(PullRequestSnapshot $snapshot, string $view, User $user): bool
-    {
-        $username = $user->getGithubUsername() ?? '';
-
-        return match ($view) {
-            'my_authored' => $snapshot->getAuthorLogin() === $username,
-            'requesting_my_review' => $this->isUserRequestedReviewer($snapshot->getAssignedReviewers(), $username),
-            'i_approved' => $this->hasUserApproved($snapshot->getCompletedReviews(), $username),
-            'blocked_by_ci' => $snapshot->getCiStatus() === 'failure',
-            'unowned' => $this->isUnowned($snapshot),
-            default => true,
-        };
-    }
-
-    private function hasUserApproved(array $completedReviews, string $username): bool
-    {
-        if ($username === '') {
-            return false;
-        }
-
-        foreach ($completedReviews as $review) {
-            if (!\is_array($review)) {
-                continue;
-            }
-
-            if (($review['login'] ?? '') === $username && ($review['state'] ?? '') === 'APPROVED') {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private function isUserRequestedReviewer(array $assignedReviewers, string $username): bool
-    {
-        if ($username === '') {
-            return false;
-        }
-
-        foreach ($assignedReviewers as $reviewer) {
-            if (!\is_array($reviewer)) {
-                continue;
-            }
-
-            if (($reviewer['login'] ?? '') === $username) {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private function isUnowned(PullRequestSnapshot $snapshot): bool
-    {
-        return [] === $snapshot->getAssignedReviewers() && [] === $snapshot->getCompletedReviews();
+        return \sprintf('%s %s, id DESC', $column, $sortDir);
     }
 
     /**
-     * @param PullRequestSnapshot[] $snapshots
+     * @return array{0: ?string, 1: array<string, mixed>, 2: array<string, mixed>}
      */
-    private function countMatching(array $snapshots, callable $predicate): int
+    private function buildOwnershipClause(string $view, string $username, string $prefix): array
     {
-        return \count(\array_filter($snapshots, $predicate));
+        $view = $this->normalizeView($view);
+        $usernameParam = $prefix . 'Username';
+
+        return match ($view) {
+            'my_authored' => [
+                \sprintf('author_login = :%s', $usernameParam),
+                [$usernameParam => $username],
+                [],
+            ],
+            'requesting_my_review' => $username === ''
+                ? ['1 = 0', [], []]
+                : [
+                    \sprintf(
+                        "EXISTS (SELECT 1 FROM json_array_elements(assigned_reviewers) reviewer WHERE reviewer->>'login' = :%s)",
+                        $usernameParam,
+                    ),
+                    [$usernameParam => $username],
+                    [],
+                ],
+            'i_approved' => $username === ''
+                ? ['1 = 0', [], []]
+                : [
+                    \sprintf(
+                        "EXISTS (SELECT 1 FROM json_array_elements(completed_reviews) review WHERE review->>'login' = :%s AND review->>'state' = 'APPROVED')",
+                        $usernameParam,
+                    ),
+                    [$usernameParam => $username],
+                    [],
+                ],
+            'blocked_by_ci' => ["ci_status = 'failure'", [], []],
+            'unowned' => ['json_array_length(assigned_reviewers) = 0 AND json_array_length(completed_reviews) = 0', [], []],
+            default => [null, [], []],
+        };
     }
 
     private function normalizeView(string $view): string

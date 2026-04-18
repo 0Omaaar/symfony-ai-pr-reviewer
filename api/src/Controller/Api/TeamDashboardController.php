@@ -221,7 +221,7 @@ final class TeamDashboardController extends AbstractController
     private function serializePr(PullRequestSnapshot $s, string $currentUsername): array
     {
         $isAuthoredByMe = $s->getAuthorLogin() === $currentUsername;
-        $isRequestingMyReview = $this->isUserRequestedReviewer(['assignedReviewers' => $s->getAssignedReviewers()], $currentUsername);
+        $isRequestingMyReview = $this->isUserRequestedReviewer($s->getAssignedReviewers(), $currentUsername);
         $isApprovedByMe = $this->hasUserApproval($s->getCompletedReviews(), $currentUsername);
         $isBlockedByCi = $s->getCiStatus() === 'failure';
         $isUnowned = [] === $s->getAssignedReviewers() && [] === $s->getCompletedReviews();
@@ -266,9 +266,13 @@ final class TeamDashboardController extends AbstractController
         ];
     }
 
-    private function isUserRequestedReviewer(array $pr, string $username): bool
+    private function isUserRequestedReviewer(array $assignedReviewers, string $username): bool
     {
-        foreach ($pr['assignedReviewers'] ?? [] as $reviewer) {
+        if ($username === '') {
+            return false;
+        }
+
+        foreach ($assignedReviewers as $reviewer) {
             if (\is_array($reviewer) && ($reviewer['login'] ?? '') === $username) {
                 return true;
             }
