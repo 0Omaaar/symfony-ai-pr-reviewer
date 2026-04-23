@@ -7,6 +7,7 @@ namespace App\Controller\Api;
 use App\Entity\PullRequestSnapshot;
 use App\Entity\User;
 use App\Repository\PullRequestSnapshotRepository;
+use App\Service\PullRequest\TeamDashboardPreviewService;
 use App\Service\CacheKeys;
 use App\Service\PullRequest\PullRequestSnapshotService;
 use Symfony\Bundle\FrameworkBundle\Controller\AbstractController;
@@ -32,6 +33,7 @@ final class TeamDashboardController extends AbstractController
     public function __construct(
         private readonly PullRequestSnapshotRepository $snapshotRepo,
         private readonly PullRequestSnapshotService $snapshotService,
+        private readonly TeamDashboardPreviewService $previewService,
         private readonly CacheInterface $cache,
     ) {
     }
@@ -153,8 +155,12 @@ final class TeamDashboardController extends AbstractController
         }
 
         $githubUsername = $user->getGithubUsername() ?? '';
+        $preview = $this->previewService->buildPreview($snapshot);
 
-        return $this->json(['data' => $this->serializePr($snapshot, $githubUsername)]);
+        return $this->json(['data' => [
+            ...$this->serializePr($snapshot, $githubUsername),
+            ...$preview,
+        ]]);
     }
 
     #[Route('/refresh', name: 'team_dashboard_refresh', methods: ['POST'])]

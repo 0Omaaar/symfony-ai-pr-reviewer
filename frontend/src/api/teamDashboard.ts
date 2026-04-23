@@ -8,6 +8,35 @@ export type OwnershipView =
   | "blocked_by_ci"
   | "unowned";
 
+export type PrCommitPreview = {
+  sha: string;
+  shortSha: string;
+  headline: string;
+  body: string | null;
+  authorLogin: string | null;
+  authorName: string | null;
+  authorAvatarUrl: string | null;
+  committedAt: string | null;
+  htmlUrl: string | null;
+};
+
+export type PrCheckRunPreview = {
+  name: string;
+  status: string;
+  conclusion: string | null;
+  detailsUrl: string | null;
+  appName: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+};
+
+export type PrCheckSummary = {
+  total: number;
+  passing: number;
+  pending: number;
+  failing: number;
+};
+
 export type PrSnapshot = {
   id: number;
   prNumber: number;
@@ -42,6 +71,10 @@ export type PrSnapshot = {
   isBlockedByCi: boolean;
   isUnowned: boolean;
   needsMyAttention: boolean;
+  commitCount?: number;
+  commits?: PrCommitPreview[];
+  checkRuns?: PrCheckRunPreview[];
+  checkSummary?: PrCheckSummary;
 };
 
 export type DashboardStats = {

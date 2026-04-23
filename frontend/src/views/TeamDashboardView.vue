@@ -1,14 +1,17 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
+import Skeleton from "@/components/ui/Skeleton.vue";
 import {
   getTeamDashboardActivity,
   getTeamDashboard,
+  getTeamDashboardPrDetail,
   getTeamDashboardStats,
   refreshTeamDashboard,
   type ActivityEvent,
   type DashboardStats,
   type OwnershipView,
+  type PrCheckRunPreview,
   type PrSnapshot,
 } from "@/api/teamDashboard";
 import { getSubscriptions } from "@/api/subscriptions";
@@ -68,12 +71,15 @@ const searchQuery = ref("");
 
 const selectedPr = ref<PrSnapshot | null>(null);
 const isSidebarOpen = ref(false);
+const isSidebarLoading = ref(false);
+const sidebarError = ref("");
 
 const activityEvents = ref<ActivityEvent[]>([]);
 const showActivity = ref(false);
 
 let statsInterval: ReturnType<typeof setInterval> | null = null;
 let prevStatsHash = "";
+let sidebarRequestId = 0;
 
 const filteredPRs = computed(() => {
   let items = pullRequests.value;
@@ -105,6 +111,32 @@ const focusEmptyText = computed(() =>
     ? "No pull requests need your attention right now."
     : ownershipViewMeta[activeView.value].empty
 );
+const hasDashboardFilters = computed(
+  () =>
+    activeView.value !== "all" ||
+    filterRepo.value !== "" ||
+    filterAuthor.value !== "" ||
+    filterReviewStatus.value !== "" ||
+    filterAiStatus.value !== "" ||
+    filterCiStatus.value !== "" ||
+    filterStaleOnly.value ||
+    filterNeedsAttention.value ||
+    searchQuery.value.trim() !== "" ||
+    sortBy.value !== "lastActivityAt" ||
+    sortDir.value !== "desc"
+);
+const emptyStateTitle = computed(() => {
+  const query = searchQuery.value.trim();
+  if (query) return `No PRs match "${query}"`;
+  if (filterNeedsAttention.value) return "Nothing needs your attention";
+  if (activeView.value !== "all") return `Nothing in ${activeViewLabel.value}`;
+  return "No pull requests to show";
+});
+const emptyStateDescription = computed(() => {
+  if (searchQuery.value.trim()) return "Try a broader search or clear the dashboard filters.";
+  if (hasDashboardFilters.value) return `${emptyResultsText.value} Reset the dashboard to widen the scope.`;
+  return "Open pull requests from your monitored repositories will appear here once your connected repos sync.";
+});
 const isBaseMetricsView = computed(
   () =>
     activeView.value === "all" &&
@@ -133,6 +165,14 @@ const refreshAgoText = computed(() => {
   if (seconds < 60) return `${seconds}s ago`;
   const minutes = Math.floor(seconds / 60);
   return `${minutes}m ago`;
+});
+const sidebarCommits = computed(() => selectedPr.value?.commits ?? []);
+const sidebarCheckRuns = computed(() => selectedPr.value?.checkRuns ?? []);
+const sidebarCheckSummary = computed(() => selectedPr.value?.checkSummary ?? {
+  total: 0,
+  passing: 0,
+  pending: 0,
+  failing: 0,
 });
 
 function normalizeOwnershipView(raw: unknown): OwnershipView {
@@ -205,13 +245,62 @@ async function loadActivity() {
 }
 
 async function openSidebar(pr: PrSnapshot) {
-  selectedPr.value = pr;
+  const requestId = ++sidebarRequestId;
+  selectedPr.value = {
+    ...pr,
+    commits: pr.commits ?? [],
+    checkRuns: pr.checkRuns ?? [],
+    checkSummary: pr.checkSummary ?? { total: 0, passing: 0, pending: 0, failing: 0 },
+  };
   isSidebarOpen.value = true;
+  await loadSidebarPreview(pr.repoFullName, pr.prNumber, requestId);
 }
 
 function closeSidebar() {
+  sidebarRequestId++;
   isSidebarOpen.value = false;
+  isSidebarLoading.value = false;
+  sidebarError.value = "";
   selectedPr.value = null;
+}
+
+async function loadSidebarPreview(repoFullName: string, prNumber: number, requestId: number) {
+  isSidebarLoading.value = true;
+  sidebarError.value = "";
+
+  try {
+    const res = await getTeamDashboardPrDetail(repoFullName, prNumber);
+    if (requestId !== sidebarRequestId) {
+      return;
+    }
+
+    selectedPr.value = {
+      ...(selectedPr.value ?? {}),
+      ...res.data,
+      commits: res.data.commits ?? [],
+      checkRuns: res.data.checkRuns ?? [],
+      checkSummary: res.data.checkSummary ?? { total: 0, passing: 0, pending: 0, failing: 0 },
+    } as PrSnapshot;
+  } catch (e) {
+    if (requestId !== sidebarRequestId) {
+      return;
+    }
+
+    sidebarError.value = e instanceof Error ? e.message : "Failed to load the PR preview.";
+  } finally {
+    if (requestId === sidebarRequestId) {
+      isSidebarLoading.value = false;
+    }
+  }
+}
+
+function retrySidebarPreview() {
+  if (!selectedPr.value) {
+    return;
+  }
+
+  const requestId = ++sidebarRequestId;
+  void loadSidebarPreview(selectedPr.value.repoFullName, selectedPr.value.prNumber, requestId);
 }
 
 function openOnGithub(url: string) {
@@ -308,6 +397,36 @@ function relativeTime(dateStr: string): string {
   if (hours < 24) return `${hours}h`;
   const days = Math.floor(hours / 24);
   return `${days}d`;
+}
+
+function formatDate(dateStr: string | null | undefined): string {
+  if (!dateStr) return "Unknown";
+  return new Date(dateStr).toLocaleString();
+}
+
+function checkRunBadge(checkRun: PrCheckRunPreview): { label: string; cls: string } {
+  if (checkRun.status !== "completed") {
+    return { label: "Running", cls: "badge-ci-pending" };
+  }
+
+  switch (checkRun.conclusion) {
+    case "success":
+    case "neutral":
+    case "skipped":
+      return { label: "Passed", cls: "badge-ci-pass" };
+    case "failure":
+    case "timed_out":
+    case "action_required":
+    case "startup_failure":
+    case "cancelled":
+      return { label: "Failed", cls: "badge-ci-fail" };
+    default:
+      return { label: "Unknown", cls: "badge-none" };
+  }
+}
+
+function reviewStateLabel(state: string): string {
+  return state.toLowerCase().split("_").join(" ");
 }
 
 function reviewStatusBadge(status: string): { label: string; cls: string } {
@@ -487,17 +606,64 @@ onUnmounted(() => {
       </div>
 
       <!-- Loading -->
-      <div v-if="isLoading" class="loading-state">
-        <div class="skeleton-row" v-for="i in 5" :key="i"></div>
+      <div v-if="isLoading" class="dashboard-loading-shell">
+        <div class="loading-panel loading-panel-hero">
+          <div class="loading-panel-copy">
+            <Skeleton width="180px" height="14px" />
+            <Skeleton width="320px" height="26px" />
+            <Skeleton width="100%" height="16px" />
+            <Skeleton width="72%" height="16px" />
+          </div>
+          <div class="loading-panel-stats">
+            <div v-for="i in 3" :key="`stat-${i}`" class="loading-stat-card">
+              <Skeleton width="64px" height="12px" />
+              <Skeleton width="48px" height="26px" />
+            </div>
+          </div>
+        </div>
+
+        <div class="loading-panel loading-panel-list">
+          <div v-for="i in 6" :key="i" class="loading-list-row">
+            <Skeleton width="36px" height="36px" rounded />
+            <div class="loading-list-copy">
+              <Skeleton width="42%" height="16px" />
+              <Skeleton width="66%" height="14px" />
+            </div>
+            <Skeleton width="92px" height="28px" />
+          </div>
+        </div>
       </div>
 
       <!-- Error -->
-      <div v-else-if="loadError" class="error-state">{{ loadError }}</div>
+      <div v-else-if="loadError" class="dashboard-error-shell">
+        <div class="state-illustration state-illustration-error">
+          <span>!</span>
+        </div>
+        <h3>Couldn’t load the team dashboard</h3>
+        <p>{{ loadError }}</p>
+        <div class="state-actions">
+          <button class="btn-primary" @click="loadDashboard">Try again</button>
+          <button v-if="hasDashboardFilters" class="btn-secondary" @click="clearFilters">Reset filters</button>
+        </div>
+      </div>
+
+      <!-- Empty -->
+      <div v-else-if="filteredPRs.length === 0 && layout !== 'focus'" class="dashboard-empty-shell">
+        <div class="state-illustration">
+          <span>↗</span>
+        </div>
+        <h3>{{ emptyStateTitle }}</h3>
+        <p>{{ emptyStateDescription }}</p>
+        <div class="state-actions">
+          <button v-if="hasDashboardFilters" class="btn-primary" @click="clearFilters">Reset dashboard</button>
+          <button v-else class="btn-secondary" @click="handleRefresh">Refresh data</button>
+        </div>
+      </div>
 
       <!-- TABLE LAYOUT -->
       <template v-else-if="layout === 'table'">
         <div class="table-wrap">
-          <table class="pr-table" v-if="filteredPRs.length > 0">
+          <table class="pr-table">
             <thead>
               <tr>
                 <th>PR</th>
@@ -542,7 +708,6 @@ onUnmounted(() => {
               </tr>
             </tbody>
           </table>
-          <div v-else class="no-results">{{ emptyResultsText }}</div>
         </div>
 
         <!-- Pagination -->
@@ -664,7 +829,41 @@ onUnmounted(() => {
               <div class="si-row"><span class="si-label">Repository</span><span class="si-value">{{ selectedPr.repoFullName }}</span></div>
               <div class="si-row"><span class="si-label">Branch</span><span class="si-value">{{ selectedPr.sourceBranch }} &rarr; {{ selectedPr.targetBranch }}</span></div>
               <div class="si-row"><span class="si-label">Author</span><span class="si-value"><img v-if="selectedPr.authorAvatarUrl" :src="selectedPr.authorAvatarUrl" class="avatar-mini" /> {{ selectedPr.authorLogin }}</span></div>
-              <div class="si-row"><span class="si-label">Opened</span><span class="si-value">{{ new Date(selectedPr.openedAt).toLocaleDateString() }}</span></div>
+              <div class="si-row"><span class="si-label">Opened</span><span class="si-value">{{ formatDate(selectedPr.openedAt) }}</span></div>
+              <div class="si-row"><span class="si-label">Last activity</span><span class="si-value">{{ formatDate(selectedPr.lastActivityAt) }}</span></div>
+            </div>
+
+            <div class="sidebar-overview">
+              <div class="sidebar-overview-card">
+                <span class="sidebar-overview-label">Commits</span>
+                <strong>{{ selectedPr.commitCount ?? "—" }}</strong>
+              </div>
+              <div class="sidebar-overview-card">
+                <span class="sidebar-overview-label">Checks</span>
+                <strong>{{ sidebarCheckSummary.total }}</strong>
+              </div>
+              <div class="sidebar-overview-card">
+                <span class="sidebar-overview-label">Reviewers</span>
+                <strong>{{ selectedPr.assignedReviewers.length + selectedPr.completedReviews.length }}</strong>
+              </div>
+            </div>
+
+            <div v-if="sidebarError" class="sidebar-inline-error">
+              <div>
+                <strong>Preview partially loaded</strong>
+                <p>{{ sidebarError }}</p>
+              </div>
+              <button class="btn-secondary btn-small" @click="retrySidebarPreview">Retry</button>
+            </div>
+
+            <div v-if="isSidebarLoading" class="sidebar-loading">
+              <Skeleton width="40%" height="14px" />
+              <Skeleton width="100%" height="18px" />
+              <Skeleton width="84%" height="18px" />
+              <div class="sidebar-loading-grid">
+                <Skeleton width="100%" height="72px" />
+                <Skeleton width="100%" height="72px" />
+              </div>
             </div>
 
             <!-- Description -->
@@ -719,8 +918,64 @@ onUnmounted(() => {
 
             <!-- CI -->
             <div class="sidebar-section">
-              <h4>CI Status</h4>
-              <span class="badge" :class="ciBadge(selectedPr.ciStatus).cls">{{ ciBadge(selectedPr.ciStatus).label }}</span>
+              <div class="sidebar-section-head">
+                <h4>CI Checks</h4>
+                <span class="badge" :class="ciBadge(selectedPr.ciStatus).cls">{{ ciBadge(selectedPr.ciStatus).label }}</span>
+              </div>
+              <div class="check-summary">
+                <span class="check-summary-pill pass">{{ sidebarCheckSummary.passing }} passing</span>
+                <span class="check-summary-pill pending">{{ sidebarCheckSummary.pending }} pending</span>
+                <span class="check-summary-pill fail">{{ sidebarCheckSummary.failing }} failing</span>
+              </div>
+              <div v-if="sidebarCheckRuns.length > 0" class="check-list">
+                <a
+                  v-for="checkRun in sidebarCheckRuns"
+                  :key="`${checkRun.name}-${checkRun.startedAt ?? checkRun.completedAt ?? 'check'}`"
+                  class="check-item"
+                  :href="checkRun.detailsUrl || selectedPr.githubUrl"
+                  target="_blank"
+                  rel="noopener"
+                >
+                  <div class="check-item-copy">
+                    <strong>{{ checkRun.name }}</strong>
+                    <span>{{ checkRun.appName || "GitHub Checks" }} · {{ checkRun.status === "completed" ? reviewStateLabel(checkRun.conclusion || "completed") : reviewStateLabel(checkRun.status) }}</span>
+                  </div>
+                  <span class="badge-sm" :class="checkRunBadge(checkRun).cls">{{ checkRunBadge(checkRun).label }}</span>
+                </a>
+              </div>
+              <p v-else class="sidebar-empty">No individual CI checks were available for this PR.</p>
+            </div>
+
+            <!-- Commits -->
+            <div class="sidebar-section">
+              <div class="sidebar-section-head">
+                <h4>Commits</h4>
+                <span class="sidebar-section-meta" v-if="selectedPr.commitCount && selectedPr.commitCount > sidebarCommits.length">
+                  Latest {{ sidebarCommits.length }} of {{ selectedPr.commitCount }}
+                </span>
+              </div>
+              <div v-if="sidebarCommits.length > 0" class="commit-list">
+                <a
+                  v-for="commit in sidebarCommits"
+                  :key="commit.sha"
+                  class="commit-item"
+                  :href="commit.htmlUrl || selectedPr.githubUrl"
+                  target="_blank"
+                  rel="noopener"
+                >
+                  <div class="commit-item-top">
+                    <span class="commit-sha">{{ commit.shortSha }}</span>
+                    <span class="commit-time">{{ formatDate(commit.committedAt) }}</span>
+                  </div>
+                  <strong class="commit-headline">{{ commit.headline }}</strong>
+                  <p v-if="commit.body" class="commit-body">{{ commit.body }}</p>
+                  <div class="commit-meta">
+                    <img v-if="commit.authorAvatarUrl" :src="commit.authorAvatarUrl" class="avatar-mini" />
+                    <span>{{ commit.authorLogin || commit.authorName || "Unknown author" }}</span>
+                  </div>
+                </a>
+              </div>
+              <p v-else class="sidebar-empty">Commit details are not available yet for this pull request.</p>
             </div>
 
             <div class="sidebar-actions">
@@ -943,11 +1198,131 @@ onUnmounted(() => {
 }
 .toolbar-btn:hover { border-color: var(--accent-mid, #7dccf0); }
 
-/* ─── Loading / Error ─────────────────────────────── */
-.loading-state { display: flex; flex-direction: column; gap: 8px; padding: 16px; }
-.skeleton-row { height: 48px; border-radius: 8px; background: linear-gradient(90deg, var(--surface-soft, #f1f5f9) 25%, var(--surface-raised, #e2e8f0) 50%, var(--surface-soft, #f1f5f9) 75%); background-size: 200% 100%; animation: shimmer 1.5s infinite; }
-@keyframes shimmer { 0% { background-position: 200% 0; } 100% { background-position: -200% 0; } }
-.error-state { padding: 20px; color: var(--error); font-weight: 600; text-align: center; }
+/* ─── Loading / Error / Empty ─────────────────────── */
+.dashboard-loading-shell,
+.dashboard-error-shell,
+.dashboard-empty-shell {
+  border-radius: var(--radius-card, 16px);
+  border: 1px solid var(--line, #e2e8f0);
+  background: var(--surface, #fff);
+  box-shadow: var(--shadow-card, 0 1px 3px rgba(0,0,0,0.06));
+}
+
+.dashboard-loading-shell {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 16px;
+}
+
+.loading-panel {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  padding: 18px;
+  border-radius: 14px;
+  background:
+    radial-gradient(circle at top right, rgba(125, 204, 240, 0.16), transparent 30%),
+    var(--surface-soft, #f8fafc);
+  border: 1px solid var(--line, #e2e8f0);
+}
+
+.loading-panel-copy {
+  flex: 1;
+  min-width: 260px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.loading-panel-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(120px, 1fr));
+  gap: 10px;
+  flex: 1;
+  min-width: 260px;
+}
+
+.loading-stat-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  justify-content: center;
+  padding: 14px;
+  border-radius: 12px;
+  background: var(--surface, #fff);
+  border: 1px solid var(--line, #e2e8f0);
+}
+
+.loading-list-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 0;
+  border-bottom: 1px solid var(--line, #e2e8f0);
+}
+
+.loading-list-row:last-child { border-bottom: none; }
+
+.loading-list-copy {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.dashboard-error-shell,
+.dashboard-empty-shell {
+  padding: 40px 28px;
+  text-align: center;
+}
+
+.dashboard-error-shell h3,
+.dashboard-empty-shell h3 {
+  margin: 0 0 8px;
+  font-size: 1.1rem;
+  color: var(--ink-strong, #1e293b);
+}
+
+.dashboard-error-shell p,
+.dashboard-empty-shell p {
+  max-width: 560px;
+  margin: 0 auto;
+  color: var(--ink-soft, #64748b);
+  line-height: 1.55;
+}
+
+.state-illustration {
+  width: 72px;
+  height: 72px;
+  margin: 0 auto 16px;
+  border-radius: 20px;
+  display: grid;
+  place-items: center;
+  background:
+    linear-gradient(135deg, rgba(125, 204, 240, 0.22), rgba(255,255,255,0.95)),
+    var(--surface-soft, #f8fafc);
+  color: var(--accent, #0d90c5);
+  font-size: 1.8rem;
+  font-weight: 800;
+  border: 1px solid rgba(125, 204, 240, 0.28);
+}
+
+.state-illustration-error {
+  color: var(--badge-ci-fail-text, #b42318);
+  background:
+    linear-gradient(135deg, rgba(244, 63, 94, 0.14), rgba(255,255,255,0.96)),
+    var(--surface-soft, #f8fafc);
+  border-color: rgba(244, 63, 94, 0.18);
+}
+
+.state-actions {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 18px;
+}
 
 /* ─── Table ───────────────────────────────────────── */
 .table-wrap {
@@ -1001,8 +1376,6 @@ onUnmounted(() => {
 .badge-ci-pass { background: var(--badge-ci-pass-bg); color: var(--badge-ci-pass-text); }
 .badge-ci-fail { background: var(--badge-ci-fail-bg); color: var(--badge-ci-fail-text); }
 .badge-ci-pending { background: var(--badge-ci-pending-bg); color: var(--badge-ci-pending-text); }
-
-.no-results { padding: 40px 20px; text-align: center; color: var(--ink-faint, #94a3b8); font-weight: 600; }
 
 /* ─── Pagination ──────────────────────────────────── */
 .pagination { display: flex; align-items: center; justify-content: center; gap: 12px; padding: 8px; }
@@ -1139,11 +1512,97 @@ onUnmounted(() => {
 .si-label { font-size: 0.78rem; font-weight: 700; color: var(--ink-faint, #94a3b8); min-width: 80px; }
 .si-value { font-size: 0.82rem; font-weight: 600; color: var(--ink-strong, #1e293b); display: flex; align-items: center; gap: 6px; }
 
+.sidebar-overview {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.sidebar-overview-card {
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line, #e2e8f0);
+  background:
+    linear-gradient(180deg, rgba(125, 204, 240, 0.08), rgba(255,255,255,0.96)),
+    var(--surface, #fff);
+}
+
+.sidebar-overview-label {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 0.68rem;
+  font-weight: 800;
+  color: var(--ink-faint, #94a3b8);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.sidebar-overview-card strong {
+  font-size: 1.05rem;
+  color: var(--ink-strong, #1e293b);
+}
+
+.sidebar-inline-error {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  margin-bottom: 18px;
+  border-radius: 12px;
+  border: 1px solid rgba(244, 63, 94, 0.2);
+  background: rgba(254, 242, 242, 0.8);
+}
+
+.sidebar-inline-error strong {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--ink-strong, #1e293b);
+}
+
+.sidebar-inline-error p {
+  margin: 0;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  color: var(--ink-soft, #64748b);
+}
+
+.sidebar-loading {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  margin-bottom: 18px;
+  border-radius: 12px;
+  border: 1px solid var(--line, #e2e8f0);
+  background: var(--surface-soft, #f8fafc);
+}
+
+.sidebar-loading-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
 .sidebar-section { margin-bottom: 18px; }
 .sidebar-section h4 { margin: 0 0 8px; font-size: 0.82rem; font-weight: 800; color: var(--ink-soft, #64748b); text-transform: uppercase; letter-spacing: 0.04em; }
 .sidebar-desc { margin: 0; font-size: 0.82rem; color: var(--ink-body, #334155); line-height: 1.5; white-space: pre-wrap; max-height: 200px; overflow-y: auto; }
 .sidebar-ai-summary { margin: 8px 0 0; font-size: 0.82rem; color: var(--ink-body, #334155); line-height: 1.5; }
 .sidebar-empty { margin: 0; font-size: 0.82rem; color: var(--ink-faint, #94a3b8); }
+.sidebar-section-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+.sidebar-section-head h4 { margin-bottom: 0; }
+.sidebar-section-meta {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--ink-faint, #94a3b8);
+}
 
 .reviewer-list { display: flex; flex-direction: column; gap: 6px; }
 .reviewer-item { display: flex; align-items: center; gap: 8px; font-size: 0.82rem; font-weight: 600; }
@@ -1158,21 +1617,140 @@ onUnmounted(() => {
 .label-list { display: flex; flex-wrap: wrap; gap: 4px; }
 .label-tag { padding: 2px 8px; border-radius: 6px; font-size: 0.72rem; font-weight: 700; background: var(--surface-raised, #e2e8f0); color: var(--ink-body, #334155); }
 
-.sidebar-actions { margin-top: 20px; }
-.btn-primary {
-  width: 100%;
+.check-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.check-summary-pill {
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.check-summary-pill.pass { background: var(--badge-ci-pass-bg); color: var(--badge-ci-pass-text); }
+.check-summary-pill.pending { background: var(--badge-ci-pending-bg); color: var(--badge-ci-pending-text); }
+.check-summary-pill.fail { background: var(--badge-ci-fail-bg); color: var(--badge-ci-fail-text); }
+
+.check-list,
+.commit-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.check-item,
+.commit-item {
+  display: block;
   padding: 12px;
+  border-radius: 12px;
+  border: 1px solid var(--line, #e2e8f0);
+  background: var(--surface-soft, #f8fafc);
+  text-decoration: none;
+  transition: transform 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease;
+}
+
+.check-item:hover,
+.commit-item:hover {
+  transform: translateY(-1px);
+  border-color: var(--accent-mid, #7dccf0);
+  box-shadow: var(--shadow-sm);
+}
+
+.check-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.check-item-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.check-item-copy strong,
+.commit-headline {
+  color: var(--ink-strong, #1e293b);
+}
+
+.check-item-copy span,
+.commit-time,
+.commit-meta {
+  font-size: 0.74rem;
+  color: var(--ink-soft, #64748b);
+}
+
+.commit-item-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.commit-sha {
+  font-family: ui-monospace, monospace;
+  font-size: 0.72rem;
+  font-weight: 800;
+  color: var(--accent, #0d90c5);
+}
+
+.commit-headline {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 0.84rem;
+}
+
+.commit-body {
+  margin: 0 0 10px;
+  color: var(--ink-body, #334155);
+  font-size: 0.78rem;
+  line-height: 1.45;
+}
+
+.commit-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.sidebar-actions { margin-top: 20px; }
+.btn-primary,
+.btn-secondary {
+  padding: 12px 14px;
   border-radius: 10px;
-  border: none;
-  background: linear-gradient(135deg, var(--accent-mid), var(--accent));
-  color: var(--accent-foreground);
   font-size: 0.88rem;
   font-weight: 700;
   cursor: pointer;
   font-family: inherit;
-  transition: transform 0.1s ease;
+  transition: transform 0.1s ease, border-color 0.1s ease;
 }
-.btn-primary:hover { transform: translateY(-1px); }
+.btn-primary {
+  width: 100%;
+  border: none;
+  background: linear-gradient(135deg, var(--accent-mid), var(--accent));
+  color: var(--accent-foreground);
+}
+.btn-secondary {
+  border: 1px solid var(--line-strong, #cbd5e1);
+  background: var(--surface, #fff);
+  color: var(--ink-body, #334155);
+}
+.btn-small {
+  width: auto;
+  padding: 8px 12px;
+  font-size: 0.76rem;
+}
+.btn-primary:hover,
+.btn-secondary:hover { transform: translateY(-1px); }
+.btn-secondary:hover { border-color: var(--accent-mid, #7dccf0); }
+.state-actions .btn-primary,
+.state-actions .btn-secondary { width: auto; }
 
 /* ─── Empty state ─────────────────────────────────── */
 .empty-state {
@@ -1203,6 +1781,7 @@ onUnmounted(() => {
 /* ─── Responsive ──────────────────────────────────── */
 @media (max-width: 1000px) {
   .kanban-board { grid-template-columns: repeat(2, 1fr); }
+  .loading-panel-stats { grid-template-columns: 1fr; }
 }
 @media (max-width: 700px) {
   .kanban-board { grid-template-columns: 1fr; }
@@ -1212,5 +1791,16 @@ onUnmounted(() => {
   .toolbar-search { width: 100%; }
   .sidebar-panel { width: 100vw; }
   .activity-drawer { width: 100vw; }
+  .loading-list-row,
+  .check-item,
+  .sidebar-inline-error { flex-direction: column; align-items: flex-start; }
+  .sidebar-overview,
+  .stat-grid,
+  .sidebar-loading-grid { grid-template-columns: 1fr; }
+  .commit-item-top,
+  .sidebar-section-head { flex-direction: column; align-items: flex-start; }
+  .state-actions { flex-direction: column; }
+  .state-actions .btn-primary,
+  .state-actions .btn-secondary { width: 100%; }
 }
 </style>

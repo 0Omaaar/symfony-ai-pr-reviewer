@@ -113,6 +113,19 @@ final class GithubApiClient
         return \is_array($data) ? $data : [];
     }
 
+    public function fetchPullRequestCommits(string $installationToken, string $fullName, int $number, int $page = 1): array
+    {
+        $response = $this->httpClient->request(
+            'GET',
+            \sprintf('https://api.github.com/repos/%s/pulls/%d/commits?per_page=100&page=%d', $fullName, $number, $page),
+            ['headers' => $this->authHeaders($installationToken)]
+        );
+
+        $data = $response->toArray(false);
+
+        return \is_array($data) ? $data : [];
+    }
+
     public function fetchRepository(string $installationToken, string $fullName): array
     {
         $response = $this->httpClient->request(
