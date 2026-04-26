@@ -129,10 +129,13 @@ export async function getTeamDashboard(params: Record<string, string | string[]>
   return res.json();
 }
 
-export async function getTeamDashboardStats(params: { view?: OwnershipView } = {}): Promise<{ data: DashboardStats }> {
+export async function getTeamDashboardStats(params: { view?: OwnershipView; workspaceId?: string } = {}): Promise<{ data: DashboardStats }> {
   const url = new URL(`${apiBaseUrl}/api/team-dashboard/stats`);
   if (params.view && params.view !== "all") {
     url.searchParams.set("view", params.view);
+  }
+  if (params.workspaceId) {
+    url.searchParams.set("workspaceId", params.workspaceId);
   }
 
   const res = await fetch(url.toString(), { credentials: "include" });
@@ -140,8 +143,10 @@ export async function getTeamDashboardStats(params: { view?: OwnershipView } = {
   return res.json();
 }
 
-export async function getTeamDashboardActivity(): Promise<{ data: ActivityEvent[] }> {
-  const res = await fetch(`${apiBaseUrl}/api/team-dashboard/activity`, { credentials: "include" });
+export async function getTeamDashboardActivity(params: { workspaceId?: string } = {}): Promise<{ data: ActivityEvent[] }> {
+  const url = new URL(`${apiBaseUrl}/api/team-dashboard/activity`);
+  if (params.workspaceId) url.searchParams.set("workspaceId", params.workspaceId);
+  const res = await fetch(url.toString(), { credentials: "include" });
   if (!res.ok) throw new Error(`Failed to fetch activity (${res.status})`);
   return res.json();
 }

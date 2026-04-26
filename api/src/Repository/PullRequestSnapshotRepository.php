@@ -150,7 +150,7 @@ class PullRequestSnapshotRepository extends ServiceEntityRepository
             ->execute();
     }
 
-    public function getDashboardStats(User $user, string $view = 'all'): array
+    public function getDashboardStats(User $user, string $view = 'all', ?array $repoFilter = null): array
     {
         $conn = $this->getEntityManager()->getConnection();
         $username = $user->getGithubUsername() ?? '';
@@ -164,6 +164,21 @@ class PullRequestSnapshotRepository extends ServiceEntityRepository
         $types = [
             'openStatuses' => ArrayParameterType::STRING,
         ];
+
+        $repoClause = '';
+        if ($repoFilter !== null) {
+            if (empty($repoFilter)) {
+                // Empty workspace — return zeroed stats
+                return [
+                    'totalOpen' => 0, 'needsReview' => 0, 'stale' => 0,
+                    'aiReviewed' => 0, 'ciFailing' => 0, 'myPRs' => 0, 'needsMyReview' => 0,
+                    'views' => ['all' => 0, 'my_authored' => 0, 'requesting_my_review' => 0, 'i_approved' => 0, 'blocked_by_ci' => 0, 'unowned' => 0],
+                ];
+            }
+            $repoClause = ' AND repo_full_name IN (:repoFilter)';
+            $params['repoFilter'] = $repoFilter;
+            $types['repoFilter'] = ArrayParameterType::STRING;
+        }
 
         [$viewClause, $viewParams, $viewTypes] = $this->buildOwnershipClause($view, $username, 'selectedView');
 
@@ -192,6 +207,8 @@ class PullRequestSnapshotRepository extends ServiceEntityRepository
             $params = [...$params, ...$viewParams];
             $types = [...$types, ...$viewTypes];
         }
+
+        $selectedStatsSql .= $repoClause;
 
         $selectedRow = $conn->fetchAssociative($selectedStatsSql, $params, $types) ?: [];
 
@@ -224,13 +241,20 @@ class PullRequestSnapshotRepository extends ServiceEntityRepository
               AND status IN (:openStatuses)
         SQL;
 
-        $viewsRow = $conn->fetchAssociative($viewsSql, [
+        $viewsParams = [
             'userId' => (int) $user->getId(),
             'openStatuses' => self::OPEN_STATUSES,
             'githubUsername' => $username,
-        ], [
-            'openStatuses' => ArrayParameterType::STRING,
-        ]) ?: [];
+        ];
+        $viewsTypes = ['openStatuses' => ArrayParameterType::STRING];
+
+        if ($repoFilter !== null && !empty($repoFilter)) {
+            $viewsSql .= $repoClause;
+            $viewsParams['repoFilter'] = $repoFilter;
+            $viewsTypes['repoFilter'] = ArrayParameterType::STRING;
+        }
+
+        $viewsRow = $conn->fetchAssociative($viewsSql, $viewsParams, $viewsTypes) ?: [];
 
         return [
             'totalOpen' => (int) ($selectedRow['total_open'] ?? 0),

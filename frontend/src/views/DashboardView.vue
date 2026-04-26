@@ -1,7 +1,8 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
-import { RouterLink, useRoute } from "vue-router";
+import { computed, onMounted, ref, watch } from "vue";
+import { RouterLink, useRoute, useRouter } from "vue-router";
 import { getSubscriptions } from "@/api/subscriptions";
+import WorkspaceSwitcher from "@/components/WorkspaceSwitcher.vue";
 
 type DashboardSetup = {
   github_app_installed?: boolean;
@@ -62,6 +63,7 @@ type UiTopRepository = {
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 const DASHBOARD_CACHE_KEY = "dashboard.payload.v1";
 const route = useRoute();
+const router = useRouter();
 const isLoading = ref(false);
 const loadError = ref("");
 const generatedAt = ref<string | null>(null);
@@ -136,15 +138,21 @@ function mapTopRepository(item: DashboardTopRepository): UiTopRepository | null 
 }
 
 async function loadDashboard() {
+  const workspaceId = route.query.workspaceId as string | undefined;
+  const isWorkspaceScoped = Boolean(workspaceId);
+
+  // Only use session cache for the unscoped view
   let hasCachedPayload = false;
-  const cachedPayload = sessionStorage.getItem(DASHBOARD_CACHE_KEY);
-  if (cachedPayload) {
-    try {
-      const cachedData = JSON.parse(cachedPayload) as DashboardResponse;
-      applyDashboardData(cachedData);
-      hasCachedPayload = true;
-    } catch {
-      sessionStorage.removeItem(DASHBOARD_CACHE_KEY);
+  if (!isWorkspaceScoped) {
+    const cachedPayload = sessionStorage.getItem(DASHBOARD_CACHE_KEY);
+    if (cachedPayload) {
+      try {
+        const cachedData = JSON.parse(cachedPayload) as DashboardResponse;
+        applyDashboardData(cachedData);
+        hasCachedPayload = true;
+      } catch {
+        sessionStorage.removeItem(DASHBOARD_CACHE_KEY);
+      }
     }
   }
 
@@ -152,9 +160,10 @@ async function loadDashboard() {
   loadError.value = "";
 
   try {
-    const response = await fetch(`${apiBaseUrl}/api/dashboard`, {
-      credentials: "include",
-    });
+    const url = new URL(`${apiBaseUrl}/api/dashboard`);
+    if (workspaceId) url.searchParams.set("workspaceId", workspaceId);
+
+    const response = await fetch(url.toString(), { credentials: "include" });
 
     if (!response.ok) {
       throw new Error(`Failed to fetch dashboard (${response.status})`);
@@ -162,7 +171,9 @@ async function loadDashboard() {
 
     const data = (await response.json()) as DashboardResponse;
     applyDashboardData(data);
-    sessionStorage.setItem(DASHBOARD_CACHE_KEY, JSON.stringify(data));
+    if (!isWorkspaceScoped) {
+      sessionStorage.setItem(DASHBOARD_CACHE_KEY, JSON.stringify(data));
+    }
   } catch (error) {
     if (!hasCachedPayload) {
       loadError.value = error instanceof Error ? error.message : "Failed to load dashboard.";
@@ -239,6 +250,10 @@ onMounted(() => {
   void loadSubscriptionCount();
 });
 
+watch(() => route.query.workspaceId, () => {
+  void loadDashboard();
+});
+
 const setupCompletion = computed(() => {
   let completed = 0;
   if (setup.value.githubAppInstalled) completed += 1;
@@ -297,6 +312,7 @@ function prStatusClass(status: "open" | "merged" | "closed") {
       </div>
 
       <div class="hero-actions">
+        <WorkspaceSwitcher />
         <a
           v-if="primaryAction.external"
           :href="primaryAction.href"

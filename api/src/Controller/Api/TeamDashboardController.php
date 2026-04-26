@@ -7,6 +7,7 @@ namespace App\Controller\Api;
 use App\Entity\PullRequestSnapshot;
 use App\Entity\User;
 use App\Repository\PullRequestSnapshotRepository;
+use App\Repository\WorkspaceRepository;
 use App\Service\PullRequest\TeamDashboardPreviewService;
 use App\Service\CacheKeys;
 use App\Service\PullRequest\PullRequestSnapshotService;
@@ -35,6 +36,7 @@ final class TeamDashboardController extends AbstractController
         private readonly PullRequestSnapshotService $snapshotService,
         private readonly TeamDashboardPreviewService $previewService,
         private readonly CacheInterface $cache,
+        private readonly WorkspaceRepository $workspaceRepo,
     ) {
     }
 
@@ -48,9 +50,29 @@ final class TeamDashboardController extends AbstractController
 
         $filters = $this->extractFilters($request);
 
+        // Resolve optional workspace scope
+        $workspaceRepos = $this->resolveWorkspaceRepos($user, $request);
+        if ($workspaceRepos === false) {
+            return $this->json(['error' => 'Workspace not found'], 404);
+        }
+        if ($workspaceRepos !== null) {
+            if (empty($workspaceRepos)) {
+                // Empty workspace — return empty results
+                return $this->json([
+                    'data' => [
+                        'pullRequests' => [],
+                        'stats' => $this->snapshotRepo->getDashboardStats($user, 'all', []),
+                        'groups' => null,
+                        'pagination' => ['total' => 0, 'page' => 1, 'perPage' => 25, 'totalPages' => 0],
+                    ],
+                ]);
+            }
+            $filters['repos'] = $workspaceRepos;
+        }
+
         $pullRequests = $this->snapshotRepo->findOpenByUser($user, $filters);
         $totalCount = $this->snapshotRepo->countOpenByUser($user, $filters);
-        $stats = $this->snapshotRepo->getDashboardStats($user, (string) ($filters['view'] ?? 'all'));
+        $stats = $this->snapshotRepo->getDashboardStats($user, (string) ($filters['view'] ?? 'all'), $workspaceRepos !== null ? $workspaceRepos : null);
 
         $page = max(1, (int) ($filters['page'] ?? 1));
         $perPage = min(100, max(1, (int) ($filters['perPage'] ?? 25)));
@@ -91,34 +113,53 @@ final class TeamDashboardController extends AbstractController
 
         $view = $this->normalizeView($request->query->get('view'));
         $userId = $user->getId();
-        if ($view === 'all') {
+
+        // Resolve optional workspace scope
+        $workspaceRepos = $this->resolveWorkspaceRepos($user, $request);
+        if ($workspaceRepos === false) {
+            return $this->json(['error' => 'Workspace not found'], 404);
+        }
+
+        if ($workspaceRepos === null && $view === 'all') {
             $stats = $this->cache->get(CacheKeys::teamDashboardStats((int) $userId), function (ItemInterface $item) use ($user): array {
                 $item->expiresAfter(60);
                 return $this->snapshotRepo->getDashboardStats($user);
             });
         } else {
-            $stats = $this->snapshotRepo->getDashboardStats($user, $view);
+            $stats = $this->snapshotRepo->getDashboardStats($user, $view, $workspaceRepos);
         }
 
         return $this->json(['data' => $stats]);
     }
 
     #[Route('/activity', name: 'team_dashboard_activity', methods: ['GET'])]
-    public function activity(): JsonResponse
+    public function activity(Request $request): JsonResponse
     {
         $user = $this->getUser();
         if (!$user instanceof User) {
             return $this->json(['error' => 'Unauthorized'], 401);
         }
 
-        // Activity feed: recent snapshot updates ordered by last activity
-        $recent = $this->snapshotRepo->createQueryBuilder('s')
+        // Resolve optional workspace scope
+        $workspaceRepos = $this->resolveWorkspaceRepos($user, $request);
+        if ($workspaceRepos === false) {
+            return $this->json(['error' => 'Workspace not found'], 404);
+        }
+
+        $qb = $this->snapshotRepo->createQueryBuilder('s')
             ->andWhere('s.appUser = :user')
             ->setParameter('user', $user)
             ->orderBy('s.lastActivityAt', 'DESC')
-            ->setMaxResults(50)
-            ->getQuery()
-            ->getResult();
+            ->setMaxResults(50);
+
+        if ($workspaceRepos !== null && \count($workspaceRepos) > 0) {
+            $qb->andWhere('s.repoFullName IN (:repos)')->setParameter('repos', $workspaceRepos);
+        } elseif ($workspaceRepos !== null && \count($workspaceRepos) === 0) {
+            // Empty workspace — return nothing
+            return $this->json(['data' => []]);
+        }
+
+        $recent = $qb->getQuery()->getResult();
 
         $events = [];
         foreach ($recent as $snapshot) {
@@ -203,6 +244,32 @@ final class TeamDashboardController extends AbstractController
             'status' => 'refreshed',
             'updatedAt' => (new \DateTimeImmutable())->format(\DateTimeInterface::ATOM),
         ]);
+    }
+
+    /**
+     * Returns null (no workspace filter), a string[] of repo names (workspace filter),
+     * or false if the workspace was not found / not owned by the user.
+     *
+     * @return string[]|null|false
+     */
+    private function resolveWorkspaceRepos(User $user, Request $request): array|null|false
+    {
+        $workspaceIdParam = $request->query->get('workspaceId');
+        if ($workspaceIdParam === null || $workspaceIdParam === '') {
+            return null;
+        }
+
+        $workspace = $this->workspaceRepo->findOneByUserAndId($user, (int) $workspaceIdParam);
+        if ($workspace === null) {
+            return false;
+        }
+
+        $repos = [];
+        foreach ($workspace->getRepositories() as $entry) {
+            $repos[] = $entry->getRepoFullName();
+        }
+
+        return $repos;
     }
 
     private function extractFilters(Request $request): array

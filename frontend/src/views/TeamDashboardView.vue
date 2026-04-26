@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref, watch } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import Skeleton from "@/components/ui/Skeleton.vue";
+import WorkspaceSwitcher from "@/components/WorkspaceSwitcher.vue";
 import {
   getTeamDashboardActivity,
   getTeamDashboard,
@@ -201,6 +202,8 @@ async function loadDashboard() {
     if (filterAiStatus.value) params.aiStatus = filterAiStatus.value;
     if (filterCiStatus.value) params.ciStatus = filterCiStatus.value;
     if (filterStaleOnly.value) params.stale = "true";
+    const workspaceId = route.query.workspaceId as string | undefined;
+    if (workspaceId) params.workspaceId = workspaceId;
 
     const res = await getTeamDashboard(params);
     pullRequests.value = res.data.pullRequests;
@@ -217,7 +220,8 @@ async function loadDashboard() {
 
 async function pollStats() {
   try {
-    const res = await getTeamDashboardStats({ view: activeView.value });
+    const workspaceId = route.query.workspaceId as string | undefined;
+    const res = await getTeamDashboardStats({ view: activeView.value, workspaceId });
     const hash = JSON.stringify(res.data);
     if (hash !== prevStatsHash) {
       prevStatsHash = hash;
@@ -239,7 +243,8 @@ async function handleRefresh() {
 
 async function loadActivity() {
   try {
-    const res = await getTeamDashboardActivity();
+    const workspaceId = route.query.workspaceId as string | undefined;
+    const res = await getTeamDashboardActivity({ workspaceId });
     activityEvents.value = res.data;
   } catch { /* silent */ }
 }
@@ -489,6 +494,14 @@ watch(
   }
 );
 
+watch(
+  () => route.query.workspaceId,
+  () => {
+    pagination.value.page = 1;
+    void loadDashboard();
+  }
+);
+
 onMounted(async () => {
   // Check if user has subscriptions
   try {
@@ -521,6 +534,10 @@ onUnmounted(() => {
     </div>
 
     <template v-else>
+      <div class="workspace-bar">
+        <WorkspaceSwitcher />
+      </div>
+
       <div class="view-switcher">
         <button
           v-for="option in ownershipViewOptions"
@@ -996,6 +1013,12 @@ onUnmounted(() => {
   flex-direction: column;
   gap: 12px;
   padding-bottom: 24px;
+}
+
+.workspace-bar {
+  display: flex;
+  align-items: center;
+  padding: 8px 0 4px;
 }
 
 /* ─── Metrics bar ─────────────────────────────────── */

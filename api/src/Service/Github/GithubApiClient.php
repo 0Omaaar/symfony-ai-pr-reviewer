@@ -44,6 +44,19 @@ final class GithubApiClient
         return \is_array($data) ? $data : [];
     }
 
+    public function fetchUserAccessibleRepositories(string $userToken, int $page): array
+    {
+        $response = $this->httpClient->request(
+            'GET',
+            \sprintf('https://api.github.com/user/repos?per_page=100&page=%d&affiliation=owner,collaborator,organization_member&sort=updated', $page),
+            ['headers' => $this->authHeaders($userToken)]
+        );
+
+        $data = $response->toArray(false);
+
+        return \is_array($data) ? $data : [];
+    }
+
     /** @return array{repositories: array, total_count: int} */
     public function fetchInstallationRepositories(string $installationToken, int $page): array
     {
