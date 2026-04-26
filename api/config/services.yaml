@@ -16,6 +16,9 @@ parameters:
     pr_alert.from_name: '%env(PR_ALERT_FROM_NAME)%'
     pr_alert.reply_to: '%env(PR_ALERT_REPLY_TO)%'
     pr_alert.front_url: '%env(PR_ALERT_FRONT_URL)%'
+    admin.email: '%env(ADMIN_EMAIL)%'
+    admin.password: '%env(ADMIN_PASSWORD)%'
+    n8n.internal_token: '%env(N8N_INTERNAL_TOKEN)%'
 
 services:
     # default configuration for services in *this* file
@@ -27,6 +30,11 @@ services:
     # this creates a service per class whose id is the fully-qualified class name
     App\:
         resource: '../src/'
+
+    Symfony\Component\HttpFoundation\Session\Storage\Handler\PdoSessionHandler:
+        arguments:
+            - '%env(resolve:DATABASE_URL)%'
+            - { db_table: 'sessions', db_id_col: 'sess_id', db_data_col: 'sess_data', db_lifetime_col: 'sess_lifetime', db_time_col: 'sess_time' }
 
     # add more service definitions when explicit configuration is needed
     # please note that last definitions always *replace* previous ones

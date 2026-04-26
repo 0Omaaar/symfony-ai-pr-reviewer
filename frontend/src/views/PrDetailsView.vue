@@ -627,9 +627,9 @@ const backLinkLabel = computed(() => {
 /* ─── Alert ──────────────────────────────────────────────────── */
 .alert.error {
     border-radius: var(--radius-inner);
-    border: 1px solid #fca5a5;
-    background: #fff1f2;
-    color: #991b1b;
+    border: 1px solid var(--tile-danger-line);
+    background: var(--tile-danger-bg);
+    color: var(--tile-danger-ink);
     padding: 11px 14px;
     font-size: 0.88rem;
 }
@@ -687,8 +687,8 @@ const backLinkLabel = computed(() => {
     letter-spacing: 0.03em;
 }
 
-.provider-chip.is-github { background: #eef3ff; color: #304e9b; border-color: #c7d3f8; }
-.provider-chip.is-gitlab { background: #fff1e6; color: #9a4418; border-color: #fdc9a5; }
+.provider-chip.is-github { background: var(--provider-github-bg); color: var(--provider-github-ink); border-color: var(--provider-github-line); }
+.provider-chip.is-gitlab { background: var(--provider-gitlab-bg); color: var(--provider-gitlab-ink); border-color: var(--provider-gitlab-line); }
 
 /* ─── Meta grid ──────────────────────────────────────────────── */
 .meta-grid {
@@ -782,7 +782,7 @@ const backLinkLabel = computed(() => {
 }
 
 .summary-strong.plus { color: var(--merged-ink); }
-.summary-strong.minus { color: #991b1b; }
+.summary-strong.minus { color: var(--error); }
 
 /* ─── File list ──────────────────────────────────────────────── */
 .files-list {
@@ -836,10 +836,10 @@ const backLinkLabel = computed(() => {
 .diff-block {
     margin: 10px 0 0;
     padding: 12px 0;
-    border: 1px solid #1e3356;
+    border: 1px solid var(--diff-border);
     border-radius: var(--radius-inner);
-    background: #0d1b2e;
-    color: #c9d8ed;
+    background: var(--diff-bg);
+    color: var(--diff-ink);
     font-size: 0.73rem;
     line-height: 1.55;
     white-space: pre;
@@ -876,16 +876,16 @@ const backLinkLabel = computed(() => {
 }
 
 .diff-btn:hover {
-    background: #cdeefb;
+    background: var(--accent-surface);
     border-color: var(--accent);
 }
 
 .diff-line { display: block; padding: 0 14px; }
-.diff-line.context { color: #8da8c4; }
-.diff-line.added   { color: #7ee8a2; background: rgba(34,197,94,0.12); }
-.diff-line.removed { color: #fca5a5; background: rgba(239,68,68,0.14); }
-.diff-line.meta    { color: #93c5fd; background: rgba(59,130,246,0.1); }
-.diff-line.hunk    { color: #fde68a; background: rgba(245,158,11,0.1); }
+.diff-line.context { color: var(--diff-context); }
+.diff-line.added   { color: var(--diff-added-ink);   background: var(--diff-added-bg); }
+.diff-line.removed { color: var(--diff-removed-ink); background: var(--diff-removed-bg); }
+.diff-line.meta    { color: var(--diff-meta-ink);    background: var(--diff-meta-bg); }
+.diff-line.hunk    { color: var(--diff-hunk-ink);    background: var(--diff-hunk-bg); }
 
 /* ─── Not found ──────────────────────────────────────────────── */
 .not-found { justify-items: start; }

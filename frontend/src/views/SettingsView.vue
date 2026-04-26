@@ -442,8 +442,8 @@ async function confirmDeleteAccount() {
   width: 18px;
   height: 18px;
   border-radius: 50%;
-  background: #ffffff;
-  box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+  background: var(--accent-foreground);
+  box-shadow: var(--shadow-sm);
   transition: left 0.2s ease;
 }
 
@@ -452,12 +452,12 @@ async function confirmDeleteAccount() {
 /* ─── Feedback ───────────────────────────────────────────────── */
 .feedback { margin: 12px 0 0; font-size: 0.84rem; font-weight: 600; }
 .feedback.success { color: var(--merged-ink); }
-.feedback.error   { color: #b91c1c; }
+.feedback.error   { color: var(--error); }
 
 /* ─── Danger zone ────────────────────────────────────────────── */
-.danger-card { border-color: #fecdd3; }
-.danger-icon { background: #fff1f2; color: #be123c; border-color: #fecdd3; }
-.danger-title { color: #be123c; }
+.danger-card { border-color: var(--tile-danger-line); }
+.danger-icon { background: var(--tile-danger-bg); color: var(--tile-danger-ink); border-color: var(--tile-danger-line); }
+.danger-title { color: var(--tile-danger-ink); }
 
 /* ─── Buttons ────────────────────────────────────────────────── */
 .btn {
@@ -474,14 +474,14 @@ async function confirmDeleteAccount() {
 .btn:disabled { opacity: 0.6; cursor: not-allowed; transform: none !important; }
 
 .btn-danger {
-  background: linear-gradient(135deg, #fff1f2 0%, #ffe4e6 100%);
-  border-color: #fda4af;
-  color: #881337;
+  background: linear-gradient(135deg, var(--surface-gradient-danger-a) 0%, var(--surface-gradient-danger-b) 100%);
+  border-color: var(--tile-danger-line);
+  color: var(--tile-danger-ink);
 }
 
 .btn-danger:hover:not(:disabled) {
   transform: translateY(-1px);
-  box-shadow: 0 8px 20px -10px rgba(159,18,57,0.4);
+  box-shadow: var(--shadow-md);
 }
 
 .btn-cancel {
@@ -550,8 +550,8 @@ async function confirmDeleteAccount() {
 }
 
 .btn-remove:hover:not(:disabled) {
-  color: #b91c1c;
-  border-color: #fca5a5;
+  color: var(--error);
+  border-color: var(--tile-danger-line);
 }
 
 .btn-remove:disabled { opacity: 0.5; cursor: not-allowed; }
@@ -574,7 +574,7 @@ async function confirmDeleteAccount() {
 
 .btn-install:hover {
   transform: translateY(-1px);
-  box-shadow: 0 4px 12px rgba(13,126,164,0.18);
+  box-shadow: var(--shadow-md);
 }
 
 .confirm-block { display: flex; flex-direction: column; gap: 12px; }
@@ -701,13 +701,13 @@ async function confirmDeleteAccount() {
   border-radius: 4px;
 }
 
-.btn-remove-repo:hover { color: #b91c1c; }
+.btn-remove-repo:hover { color: var(--error); }
 
 .repo-empty-warn {
   margin: 0;
   font-size: 0.82rem;
   font-weight: 600;
-  color: #b45309;
+  color: var(--warning);
 }
 
 .prefs-actions { display: flex; }
@@ -727,7 +727,7 @@ async function confirmDeleteAccount() {
 
 .btn-save:hover:not(:disabled) {
   transform: translateY(-1px);
-  box-shadow: 0 6px 16px -8px rgba(13,126,164,0.35);
+  box-shadow: var(--shadow-md);
 }
 
 .btn-save:disabled { opacity: 0.6; cursor: not-allowed; }

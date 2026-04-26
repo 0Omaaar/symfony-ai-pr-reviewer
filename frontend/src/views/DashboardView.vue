@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
-import { RouterLink, useRoute } from "vue-router";
+import { computed, onMounted, ref, watch } from "vue";
+import { RouterLink, useRoute, useRouter } from "vue-router";
+import { getSubscriptions } from "@/api/subscriptions";
+import WorkspaceSwitcher from "@/components/WorkspaceSwitcher.vue";
 
 type DashboardSetup = {
   github_app_installed?: boolean;
@@ -61,6 +63,7 @@ type UiTopRepository = {
 const apiBaseUrl = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8000";
 const DASHBOARD_CACHE_KEY = "dashboard.payload.v1";
 const route = useRoute();
+const router = useRouter();
 const isLoading = ref(false);
 const loadError = ref("");
 const generatedAt = ref<string | null>(null);
@@ -135,15 +138,21 @@ function mapTopRepository(item: DashboardTopRepository): UiTopRepository | null 
 }
 
 async function loadDashboard() {
+  const workspaceId = route.query.workspaceId as string | undefined;
+  const isWorkspaceScoped = Boolean(workspaceId);
+
+  // Only use session cache for the unscoped view
   let hasCachedPayload = false;
-  const cachedPayload = sessionStorage.getItem(DASHBOARD_CACHE_KEY);
-  if (cachedPayload) {
-    try {
-      const cachedData = JSON.parse(cachedPayload) as DashboardResponse;
-      applyDashboardData(cachedData);
-      hasCachedPayload = true;
-    } catch {
-      sessionStorage.removeItem(DASHBOARD_CACHE_KEY);
+  if (!isWorkspaceScoped) {
+    const cachedPayload = sessionStorage.getItem(DASHBOARD_CACHE_KEY);
+    if (cachedPayload) {
+      try {
+        const cachedData = JSON.parse(cachedPayload) as DashboardResponse;
+        applyDashboardData(cachedData);
+        hasCachedPayload = true;
+      } catch {
+        sessionStorage.removeItem(DASHBOARD_CACHE_KEY);
+      }
     }
   }
 
@@ -151,9 +160,10 @@ async function loadDashboard() {
   loadError.value = "";
 
   try {
-    const response = await fetch(`${apiBaseUrl}/api/dashboard`, {
-      credentials: "include",
-    });
+    const url = new URL(`${apiBaseUrl}/api/dashboard`);
+    if (workspaceId) url.searchParams.set("workspaceId", workspaceId);
+
+    const response = await fetch(url.toString(), { credentials: "include" });
 
     if (!response.ok) {
       throw new Error(`Failed to fetch dashboard (${response.status})`);
@@ -161,7 +171,9 @@ async function loadDashboard() {
 
     const data = (await response.json()) as DashboardResponse;
     applyDashboardData(data);
-    sessionStorage.setItem(DASHBOARD_CACHE_KEY, JSON.stringify(data));
+    if (!isWorkspaceScoped) {
+      sessionStorage.setItem(DASHBOARD_CACHE_KEY, JSON.stringify(data));
+    }
   } catch (error) {
     if (!hasCachedPayload) {
       loadError.value = error instanceof Error ? error.message : "Failed to load dashboard.";
@@ -222,7 +234,23 @@ const setupFlash = computed(() => {
   return null;
 });
 
+const activeSubscriptionCount = ref(0);
+
+async function loadSubscriptionCount() {
+  try {
+    const data = await getSubscriptions();
+    activeSubscriptionCount.value = data.count;
+  } catch {
+    activeSubscriptionCount.value = 0;
+  }
+}
+
 onMounted(() => {
+  void loadDashboard();
+  void loadSubscriptionCount();
+});
+
+watch(() => route.query.workspaceId, () => {
   void loadDashboard();
 });
 
@@ -284,6 +312,7 @@ function prStatusClass(status: "open" | "merged" | "closed") {
       </div>
 
       <div class="hero-actions">
+        <WorkspaceSwitcher />
         <a
           v-if="primaryAction.external"
           :href="primaryAction.href"
@@ -406,6 +435,10 @@ function prStatusClass(status: "open" | "merged" | "closed") {
               <p class="kpi-label">Closed PRs</p>
               <p class="kpi-value">{{ kpis.pullRequestsClosed }}</p>
             </div>
+            <div class="kpi-card kpi-monitored">
+              <p class="kpi-label">Branches Monitored</p>
+              <p class="kpi-value">{{ activeSubscriptionCount }}</p>
+            </div>
           </div>
         </article>
       </section>
@@ -486,6 +519,11 @@ function prStatusClass(status: "open" | "merged" | "closed") {
         </div>
 
         <div class="quick-grid">
+          <RouterLink :to="{ name: 'team-dashboard' }" class="quick-card quick-card-featured">
+            <p class="quick-badge">New</p>
+            <p class="quick-title">Team Dashboard</p>
+            <p class="quick-desc">Real-time kanban, table & focus views for all open PRs across your repos.</p>
+          </RouterLink>
           <RouterLink :to="{ name: 'repos' }" class="quick-card">
             <p class="quick-title">Repositories Hub</p>
             <p class="quick-desc">Browse repos, branches, and pull request lists.</p>
@@ -521,7 +559,7 @@ function prStatusClass(status: "open" | "merged" | "closed") {
   gap: 16px;
   border: 1px solid var(--line);
   border-radius: var(--radius-card);
-  background: linear-gradient(135deg, #ffffff 0%, #f4f9ff 100%);
+  background: linear-gradient(135deg, var(--surface-gradient-a) 0%, var(--surface-gradient-b) 100%);
   padding: 20px 22px;
   box-shadow: var(--shadow-card);
 }
@@ -573,13 +611,13 @@ function prStatusClass(status: "open" | "merged" | "closed") {
 
 .action-btn.primary {
   background: var(--accent);
-  color: #ffffff;
-  box-shadow: 0 4px 12px rgba(13,126,164,0.3);
+  color: var(--accent-foreground);
+  box-shadow: var(--shadow-sm);
 }
 
 .action-btn.primary:hover {
   transform: translateY(-1px);
-  box-shadow: 0 6px 18px rgba(13,126,164,0.45);
+  box-shadow: var(--shadow-md);
 }
 
 .action-btn.secondary {
@@ -595,9 +633,9 @@ function prStatusClass(status: "open" | "merged" | "closed") {
 /* ─── Alert ──────────────────────────────────────────────────── */
 .alert {
   border-radius: var(--radius-inner);
-  border: 1px solid #fca5a5;
-  background: #fff1f2;
-  color: #991b1b;
+  border: 1px solid var(--tile-danger-line);
+  background: var(--tile-danger-bg);
+  color: var(--tile-danger-ink);
   padding: 11px 14px;
   font-size: 0.88rem;
   display: flex;
@@ -623,7 +661,7 @@ function prStatusClass(status: "open" | "merged" | "closed") {
 .onboarding-card {
   border: 1px solid var(--accent-mid);
   border-radius: var(--radius-card);
-  background: linear-gradient(135deg, #f0f9ff 0%, #e8f4fd 100%);
+  background: linear-gradient(135deg, var(--surface-gradient-a) 0%, var(--accent-bg) 100%);
   box-shadow: var(--shadow-card);
   padding: 24px 26px;
 }
@@ -685,7 +723,7 @@ function prStatusClass(status: "open" | "merged" | "closed") {
   height: 28px;
   border-radius: 50%;
   background: var(--accent);
-  color: #fff;
+  color: var(--accent-foreground);
   font-size: 0.8rem;
   font-weight: 800;
   display: flex;
@@ -760,7 +798,7 @@ function prStatusClass(status: "open" | "merged" | "closed") {
 .filter-btn.active {
   background: var(--surface);
   color: var(--accent);
-  box-shadow: 0 1px 4px rgba(12,26,46,0.08);
+  box-shadow: var(--shadow-sm);
   font-weight: 700;
 }
 
@@ -793,7 +831,7 @@ function prStatusClass(status: "open" | "merged" | "closed") {
   margin-left: auto;
 }
 
-.filter-clear:hover { color: #b91c1c; border-color: #fca5a5; }
+.filter-clear:hover { color: var(--error); border-color: var(--tile-danger-line); }
 
 /* ─── Panel ──────────────────────────────────────────────────── */
 .panel {
@@ -869,7 +907,7 @@ function prStatusClass(status: "open" | "merged" | "closed") {
 .progress-fill {
   display: block;
   height: 100%;
-  background: linear-gradient(90deg, var(--accent), #0a6b8f);
+  background: linear-gradient(90deg, var(--accent), var(--accent-mid));
   border-radius: var(--radius-pill);
   transition: width 0.5s ease;
 }
@@ -909,9 +947,9 @@ function prStatusClass(status: "open" | "merged" | "closed") {
 }
 
 .check-state.todo {
-  background: #fffbeb;
-  color: #92400e;
-  border: 1px solid #fcd34d;
+  background: var(--tile-warning-bg);
+  color: var(--tile-warning-ink);
+  border: 1px solid var(--tile-warning-line);
 }
 
 .check-title {
@@ -951,8 +989,12 @@ function prStatusClass(status: "open" | "merged" | "closed") {
   left: 0;
   right: 0;
   height: 3px;
-  background: linear-gradient(90deg, var(--accent), #57c3e8);
+  background: linear-gradient(90deg, var(--accent), var(--accent-light));
   border-radius: var(--radius-inner) var(--radius-inner) 0 0;
+}
+
+.kpi-monitored::before {
+  background: linear-gradient(90deg, var(--success), var(--success-light));
 }
 
 .kpi-label {
@@ -996,7 +1038,7 @@ function prStatusClass(status: "open" | "merged" | "closed") {
 
 .pr-item:hover, .repo-item:hover {
   border-color: var(--accent-mid);
-  box-shadow: 0 2px 8px rgba(13,126,164,0.08);
+  box-shadow: var(--shadow-sm);
 }
 
 .pr-main, .repo-main { min-width: 0; flex: 1; }
@@ -1050,7 +1092,7 @@ function prStatusClass(status: "open" | "merged" | "closed") {
 
 .quick-grid {
   display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 10px;
 }
 
@@ -1068,6 +1110,30 @@ function prStatusClass(status: "open" | "merged" | "closed") {
   transform: translateY(-2px);
   border-color: var(--accent-mid);
   box-shadow: var(--shadow-hover);
+}
+
+.quick-card-featured {
+  border-color: var(--accent-mid);
+  background: linear-gradient(135deg, var(--surface-gradient-a) 0%, var(--accent-bg) 100%);
+  position: relative;
+}
+
+.quick-card-featured:hover {
+  border-color: var(--accent);
+  box-shadow: var(--shadow-md);
+}
+
+.quick-badge {
+  display: inline-block;
+  margin: 0 0 6px;
+  border-radius: var(--radius-pill);
+  padding: 2px 8px;
+  font-size: 0.65rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--accent-foreground);
+  background: var(--accent);
 }
 
 .quick-title {
@@ -1095,6 +1161,9 @@ function prStatusClass(status: "open" | "merged" | "closed") {
 /* ─── Responsive ─────────────────────────────────────────────── */
 @media (max-width: 1100px) {
   .two-cols { grid-template-columns: 1fr; }
+  .quick-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@media (min-width: 1101px) and (max-width: 1300px) {
   .quick-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 

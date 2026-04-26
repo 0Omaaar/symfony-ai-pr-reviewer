@@ -25,3 +25,5 @@ framework:
             # Route your messages to the transports
             App\Message\ReviewPullRequestMessage: async
             App\Message\CleanupGithubInstallationMessage: async
+            App\Message\ProcessPullRequestMessage: async
+            App\Message\RefreshPullRequestSnapshotsMessage: async

@@ -11,16 +11,33 @@ security:
             entity:
                 class: App\Entity\User
                 property: githubId
+        admin_provider:
+            memory:
+                users: []
 
     firewalls:
         dev:
             # Ensure dev tools and static assets are always allowed
             pattern: ^/(_profiler|_wdt|assets|build)/
             security: false
+
+        admin:
+            pattern: ^/api/admin
+            stateless: true
+            provider: admin_provider
+            custom_authenticator: App\Security\AdminJwtAuthenticator
+
         main:
             lazy: true
             provider: app_user_provider
             custom_authenticator: App\Security\GithubAuthenticator
+            remember_me:
+                secret: '%kernel.secret%'
+                lifetime: 2592000
+                path: /
+                secure: auto
+                samesite: lax
+                always_remember_me: true
             logout:
                 path: app_logout
 
@@ -32,6 +49,8 @@ security:
 
     # Note: Only the *first* matching rule is applied
     access_control:
+        - { path: ^/api/admin/auth/login, roles: PUBLIC_ACCESS }
+        - { path: ^/api/admin, roles: ROLE_ADMIN }
         - { path: ^/connect/github, roles: PUBLIC_ACCESS }
         - { path: ^/connect/github/check, roles: PUBLIC_ACCESS }
         - { path: ^/connect/github/app/setup, roles: PUBLIC_ACCESS }
@@ -40,7 +59,8 @@ security:
         - { path: ^/api/ping, roles: PUBLIC_ACCESS }
         - { path: ^/unsubscribe, roles: PUBLIC_ACCESS }
         - { path: ^/webhooks, roles: PUBLIC_ACCESS }
-        - { path: ^/api, roles: IS_AUTHENTICATED_FULLY }
+        - { path: ^/api/webhooks, roles: PUBLIC_ACCESS }
+        - { path: ^/api, roles: IS_AUTHENTICATED_REMEMBERED }
 
 when@test:
     security:

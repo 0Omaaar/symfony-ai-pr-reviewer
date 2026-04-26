@@ -96,9 +96,9 @@ const isInvalid = computed(() => status.value === "invalid" || (status.value !==
 }
 
 .invalid-icon {
-  background: #fff1f2;
-  color: #be123c;
-  border-color: #fecdd3;
+  background: var(--tile-danger-bg);
+  color: var(--tile-danger-ink);
+  border-color: var(--tile-danger-line);
 }
 
 .neutral-icon {
@@ -147,10 +147,10 @@ const isInvalid = computed(() => status.value === "invalid" || (status.value !==
   background: var(--accent-light);
   border-color: var(--accent-mid);
   color: var(--accent-hover);
-  box-shadow: 0 4px 12px rgba(13,126,164,0.2);
+  box-shadow: var(--shadow-sm);
 }
 
-.btn-primary:hover { box-shadow: 0 8px 20px rgba(13,126,164,0.32); }
+.btn-primary:hover { box-shadow: var(--shadow-md); }
 
 .btn-secondary {
   background: var(--surface-soft);

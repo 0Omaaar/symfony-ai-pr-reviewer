@@ -4,8 +4,9 @@ framework:
 
     # Note that the session will be started ONLY if you read or write from it.
     session:
-        cookie_lifetime: 604800   # cookie lives 7 days in browser
-        gc_maxlifetime: 604800    # server keeps session data for 7 days
+        handler_id: 'Symfony\Component\HttpFoundation\Session\Storage\Handler\PdoSessionHandler'
+        cookie_lifetime: 2592000  # cookie lives 30 days in browser
+        gc_maxlifetime: 2592000   # server keeps session data for 30 days
         cookie_secure: auto       # HTTPS only in prod, HTTP allowed in dev
         cookie_samesite: lax
 

@@ -1,5 +1,5 @@
 <template>
-  <section class="login-page">
+  <section class="login-page" data-theme="light">
     <div class="background-glow glow-a" aria-hidden="true"></div>
     <div class="background-glow glow-b" aria-hidden="true"></div>
 
@@ -168,7 +168,7 @@ function login() {
 
 .error-message {
   margin: 14px 0 0;
-  color: #b91c1c;
+  color: var(--error);
   font-weight: 600;
   font-size: 0.88rem;
 }

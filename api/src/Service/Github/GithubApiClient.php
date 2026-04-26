@@ -44,6 +44,19 @@ final class GithubApiClient
         return \is_array($data) ? $data : [];
     }
 
+    public function fetchUserAccessibleRepositories(string $userToken, int $page): array
+    {
+        $response = $this->httpClient->request(
+            'GET',
+            \sprintf('https://api.github.com/user/repos?per_page=100&page=%d&affiliation=owner,collaborator,organization_member&sort=updated', $page),
+            ['headers' => $this->authHeaders($userToken)]
+        );
+
+        $data = $response->toArray(false);
+
+        return \is_array($data) ? $data : [];
+    }
+
     /** @return array{repositories: array, total_count: int} */
     public function fetchInstallationRepositories(string $installationToken, int $page): array
     {
@@ -113,6 +126,19 @@ final class GithubApiClient
         return \is_array($data) ? $data : [];
     }
 
+    public function fetchPullRequestCommits(string $installationToken, string $fullName, int $number, int $page = 1): array
+    {
+        $response = $this->httpClient->request(
+            'GET',
+            \sprintf('https://api.github.com/repos/%s/pulls/%d/commits?per_page=100&page=%d', $fullName, $number, $page),
+            ['headers' => $this->authHeaders($installationToken)]
+        );
+
+        $data = $response->toArray(false);
+
+        return \is_array($data) ? $data : [];
+    }
+
     public function fetchRepository(string $installationToken, string $fullName): array
     {
         $response = $this->httpClient->request(
@@ -170,6 +196,45 @@ final class GithubApiClient
         $data = $response->toArray(false);
 
         return \is_array($data) ? \count($data) : 0;
+    }
+
+    public function fetchPullRequestReviews(string $installationToken, string $fullName, int $number): array
+    {
+        $response = $this->httpClient->request(
+            'GET',
+            \sprintf('https://api.github.com/repos/%s/pulls/%d/reviews?per_page=100', $fullName, $number),
+            ['headers' => $this->authHeaders($installationToken)]
+        );
+
+        $data = $response->toArray(false);
+
+        return \is_array($data) ? $data : [];
+    }
+
+    public function fetchPullRequestRequestedReviewers(string $installationToken, string $fullName, int $number): array
+    {
+        $response = $this->httpClient->request(
+            'GET',
+            \sprintf('https://api.github.com/repos/%s/pulls/%d/requested_reviewers', $fullName, $number),
+            ['headers' => $this->authHeaders($installationToken)]
+        );
+
+        $data = $response->toArray(false);
+
+        return \is_array($data) ? $data : [];
+    }
+
+    public function fetchCombinedStatus(string $installationToken, string $fullName, string $ref): array
+    {
+        $response = $this->httpClient->request(
+            'GET',
+            \sprintf('https://api.github.com/repos/%s/commits/%s/check-runs?per_page=100', $fullName, $ref),
+            ['headers' => $this->authHeaders($installationToken)]
+        );
+
+        $data = $response->toArray(false);
+
+        return \is_array($data) ? $data : [];
     }
 
     private function extractLastPageFromLinkHeader(string $linkHeader): ?int

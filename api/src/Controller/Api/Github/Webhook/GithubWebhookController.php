@@ -37,7 +37,12 @@ final class GithubWebhookController extends AbstractController
         $signature = (string) $request->headers->get('X-Hub-Signature-256', '');
         $deliveryId = (string) $request->headers->get('X-GitHub-Delivery', '');
 
-        if (!$this->webhookService->verifySignature($rawBody, $signature)) {
+        $internalToken = (string) $request->headers->get('X-Internal-Token', '');
+        $expectedToken = (string) $this->getParameter('n8n.internal_token');
+
+        if ($internalToken !== '' && hash_equals($expectedToken, $internalToken)) {
+            // Authenticated via internal token (n8n forwarding) — skip signature check
+        } elseif (!$this->webhookService->verifySignature($rawBody, $signature)) {
             return $this->json(['ok' => false, 'error' => 'Invalid signature'], Response::HTTP_UNAUTHORIZED);
         }
 
@@ -83,6 +88,7 @@ final class GithubWebhookController extends AbstractController
         $repositoryFullName = $payload['repository']['full_name'] ?? null;
         $pullRequestNumber = $payload['pull_request']['number'] ?? null;
         $headSha = $payload['pull_request']['head']['sha'] ?? null;
+        $baseBranch = (string) ($payload['pull_request']['base']['ref'] ?? '');
         $action = (string) ($payload['action'] ?? '');
 
         if (!is_int($installationId) || !is_int($repositoryId) || !is_string($repositoryFullName) || !is_int($pullRequestNumber) || !is_string($headSha) || $headSha === '') {
@@ -115,7 +121,8 @@ final class GithubWebhookController extends AbstractController
             $pullRequestNumber,
             $action,
             $headSha,
-            $deliveryId
+            $deliveryId,
+            $baseBranch,
         ));
 
         return $this->json(['ok' => true, 'event' => $githubEvent, 'delivery' => $deliveryId, 'dispatched' => true]);

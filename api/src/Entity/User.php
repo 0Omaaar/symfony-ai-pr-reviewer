@@ -12,6 +12,7 @@ use Symfony\Component\Security\Core\User\UserInterface;
 #[ORM\Entity(repositoryClass: UserRepository::class)]
 #[ORM\Table(name: '`user`')]
 #[ORM\UniqueConstraint(name: 'UNIQ_IDENTIFIER_EMAIL', fields: ['email'])]
+#[ORM\HasLifecycleCallbacks]
 class User implements UserInterface, PasswordAuthenticatedUserInterface
 {
     #[ORM\Id]
@@ -40,6 +41,9 @@ class User implements UserInterface, PasswordAuthenticatedUserInterface
     #[ORM\Column(length: 100, nullable: true)]
     private ?string $githubUsername = null;
 
+    #[ORM\Column(length: 255, nullable: true)]
+    private ?string $githubAccessToken = null;
+
     #[ORM\Column]
     private bool $emailNotificationsEnabled = true;
 
@@ -48,6 +52,15 @@ class User implements UserInterface, PasswordAuthenticatedUserInterface
 
     #[ORM\Column(type: 'json', nullable: true)]
     private ?array $notificationPreferences = null;
+
+    #[ORM\Column(type: 'json', nullable: true)]
+    private ?array $onboardingState = null;
+
+    #[ORM\Column(nullable: true)]
+    private ?\DateTimeImmutable $createdAt = null;
+
+    #[ORM\Column(nullable: true)]
+    private ?\DateTimeImmutable $suspendedAt = null;
 
     /**
      * @var Collection<int, UserGithubInstallation>
@@ -159,6 +172,18 @@ class User implements UserInterface, PasswordAuthenticatedUserInterface
         return $this;
     }
 
+    public function getGithubAccessToken(): ?string
+    {
+        return $this->githubAccessToken;
+    }
+
+    public function setGithubAccessToken(?string $githubAccessToken): static
+    {
+        $this->githubAccessToken = $githubAccessToken;
+
+        return $this;
+    }
+
     public function isEmailNotificationsEnabled(): bool
     {
         return $this->emailNotificationsEnabled;
@@ -195,6 +220,60 @@ class User implements UserInterface, PasswordAuthenticatedUserInterface
         return $this;
     }
 
+    public function getOnboardingState(): array
+    {
+        return \array_replace_recursive(self::defaultOnboardingState(), $this->onboardingState ?? []);
+    }
+
+    public function setOnboardingState(array $state): static
+    {
+        $this->onboardingState = $state;
+
+        return $this;
+    }
+
+    public static function defaultOnboardingState(): array
+    {
+        return [
+            'completedSteps' => [],
+            'dismissedAt' => null,
+            'completedAt' => null,
+            'firstReviewReceivedAt' => null,
+        ];
+    }
+
+    public function completeOnboardingStep(string $step): static
+    {
+        $state = $this->getOnboardingState();
+        if (!\in_array($step, $state['completedSteps'], true)) {
+            $state['completedSteps'][] = $step;
+        }
+
+        $allSteps = ['github_connected', 'app_installed', 'branch_activated', 'preferences_set', 'first_review_received'];
+        if (\count(\array_intersect($allSteps, $state['completedSteps'])) === \count($allSteps) && $state['completedAt'] === null) {
+            $state['completedAt'] = (new \DateTimeImmutable())->format(\DateTimeInterface::ATOM);
+        }
+
+        $this->onboardingState = $state;
+
+        return $this;
+    }
+
+    public function isOnboardingStepComplete(string $step): bool
+    {
+        return \in_array($step, $this->getOnboardingState()['completedSteps'], true);
+    }
+
+    public function isOnboardingDismissed(): bool
+    {
+        return $this->getOnboardingState()['dismissedAt'] !== null;
+    }
+
+    public function isOnboardingComplete(): bool
+    {
+        return $this->getOnboardingState()['completedAt'] !== null;
+    }
+
     public static function defaultNotificationPreferences(): array
     {
         return [
@@ -219,6 +298,34 @@ class User implements UserInterface, PasswordAuthenticatedUserInterface
         }
 
         return $this;
+    }
+
+    public function getCreatedAt(): ?\DateTimeImmutable
+    {
+        return $this->createdAt;
+    }
+
+    #[ORM\PrePersist]
+    public function setCreatedAtOnPersist(): void
+    {
+        $this->createdAt ??= new \DateTimeImmutable();
+    }
+
+    public function getSuspendedAt(): ?\DateTimeImmutable
+    {
+        return $this->suspendedAt;
+    }
+
+    public function setSuspendedAt(?\DateTimeImmutable $suspendedAt): static
+    {
+        $this->suspendedAt = $suspendedAt;
+
+        return $this;
+    }
+
+    public function isSuspended(): bool
+    {
+        return $this->suspendedAt !== null;
     }
 
     /**

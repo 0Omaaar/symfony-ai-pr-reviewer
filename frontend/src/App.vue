@@ -2,6 +2,10 @@
 import { computed, onMounted, ref } from "vue";
 import { useRoute, useRouter } from "vue-router";
 import { clearCachedAuth, setCachedAuth } from "@/api/auth";
+import OnboardingChecklist from "@/components/OnboardingChecklist.vue";
+import ThemeToggle from "@/components/ui/ThemeToggle.vue";
+import Toast from "@/components/ui/Toast.vue";
+import { getTeamDashboardStats } from "@/api/teamDashboard";
 
 type MeResponse = {
   authenticated?: boolean;
@@ -69,13 +73,24 @@ async function logout() {
   }
 }
 
-onMounted(() => { void fetchCurrentUser(); });
+onMounted(() => {
+  void fetchCurrentUser();
+  void loadAttentionCount();
+});
 
 const isInstallDisabled = computed(() => Boolean(me.value?.authenticated) && Boolean(me.value?.githubAppInstalled));
 const isLogoutDisabled = computed(() => !Boolean(me.value?.authenticated) || isLoggingOut.value);
 
 const isAuthenticated = computed(() => Boolean(me.value?.authenticated));
 const showAppLayout = computed(() => Boolean(route.meta.requiresAuth));
+
+const needsAttentionCount = ref(0);
+async function loadAttentionCount() {
+  try {
+    const res = await getTeamDashboardStats();
+    needsAttentionCount.value = (res.data?.needsReview ?? 0);
+  } catch { /* silent */ }
+}
 
 function isActive(names: string[]) {
   return names.includes(route.name as string);
@@ -110,11 +125,26 @@ function isActive(names: string[]) {
           <span class="nav-label">Dashboard</span>
         </RouterLink>
 
+        <RouterLink to="/dashboard/team" class="nav-link" :class="{ active: isActive(['team-dashboard']) }">
+          <span class="nav-icon">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M4 6H2v14c0 1.1.9 2 2 2h14v-2H4V6zm16-4H8c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2zm0 14H8V4h12v12z"/></svg>
+          </span>
+          <span class="nav-label">Team PRs</span>
+          <span v-if="needsAttentionCount > 0" class="nav-badge">{{ needsAttentionCount }}</span>
+        </RouterLink>
+
         <RouterLink to="/repos" class="nav-link" :class="{ active: isActive(['repos', 'repo-details', 'pr-details']) }">
           <span class="nav-icon">
             <svg viewBox="0 0 24 24" fill="currentColor"><path d="M20 6h-2.18c.07-.44.18-.88.18-1.35C18 2.06 15.94 0 13.35 0c-1.46 0-2.67.6-3.55 1.55L9 3 8.2 1.55C7.32.6 6.11 0 4.65 0 2.06 0 0 2.06 0 4.65c0 .47.11.91.18 1.35H0v2h1l1 13h18l1-13h1V6h-2zm-6.65-4c1.06 0 1.96.8 2.1 1.82L13.53 6H10.5l-1.94-2.16C9.08 2.82 9.97 2 11.04 2h2.31z"/></svg>
           </span>
           <span class="nav-label">Repositories</span>
+        </RouterLink>
+
+        <RouterLink to="/workspaces" class="nav-link" :class="{ active: isActive(['workspaces']) }">
+          <span class="nav-icon">
+            <svg viewBox="0 0 24 24" fill="currentColor"><path d="M20 6h-8l-2-2H4c-1.1 0-2 .9-2 2v12c0 1.1.9 2 2 2h16c1.1 0 2-.9 2-2V8c0-1.1-.9-2-2-2zm0 12H4V8h16v10z"/></svg>
+          </span>
+          <span class="nav-label">Workspaces</span>
         </RouterLink>
 
         <RouterLink to="/settings" class="nav-link" :class="{ active: isActive(['settings']) }">
@@ -138,6 +168,11 @@ function isActive(names: string[]) {
         <span class="install-prompt-text">Install GitHub App</span>
         <span class="install-prompt-arrow">→</span>
       </button>
+
+      <!-- Theme toggle (always rendered in dark-tone pill against dark sidebar) -->
+      <div class="theme-toggle-row" data-theme="dark">
+        <ThemeToggle variant="compact" />
+      </div>
 
       <!-- User identity + actions -->
       <div class="user-panel">
@@ -171,7 +206,11 @@ function isActive(names: string[]) {
     <main class="content">
       <RouterView />
     </main>
+
+    <OnboardingChecklist v-if="isAuthenticated" />
   </div>
+
+  <Toast />
 </template>
 
 <style scoped>
@@ -179,7 +218,7 @@ function isActive(names: string[]) {
   display: grid;
   grid-template-columns: 256px minmax(0, 1fr);
   min-height: 100vh;
-  background: #eef3fa;
+  background: var(--page-bg);
   font-family: var(--font-sans, "Manrope", sans-serif);
 }
 
@@ -318,6 +357,22 @@ function isActive(names: string[]) {
   line-height: 1;
 }
 
+.nav-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, #ef4444, #dc2626);
+  color: #ffffff;
+  font-size: 0.68rem;
+  font-weight: 800;
+  line-height: 1;
+  margin-left: auto;
+}
+
 /* ─── Spacer ─────────────────────────────────────────────────── */
 .spacer { flex: 1; }
 
@@ -348,6 +403,14 @@ function isActive(names: string[]) {
 .install-prompt-icon { font-size: 1rem; }
 .install-prompt-text { flex: 1; }
 .install-prompt-arrow { opacity: 0.6; }
+
+/* ─── Theme toggle row ───────────────────────────────────────── */
+.theme-toggle-row {
+  display: flex;
+  justify-content: center;
+  padding: 8px 0;
+  flex-shrink: 0;
+}
 
 /* ─── User panel ─────────────────────────────────────────────── */
 .user-panel {

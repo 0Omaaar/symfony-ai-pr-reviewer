@@ -8,7 +8,8 @@ GitHub pull request monitoring platform. Connects to your GitHub App installatio
 - **Frontend**: Vue 3 + Vite + TypeScript SPA
 - **Database**: PostgreSQL
 - **Cache**: Redis (configurable via `MESSENGER_TRANSPORT_DSN` / Symfony Cache)
-- **Email**: Symfony Mailer (Mailpit locally)
+- **Email**: Symfony Mailer (Gmail SMTP in dev, configurable per environment)
+- **Workflow Automation**: n8n (webhook splitter / orchestration layer)
 - **Observability**: Prometheus + Grafana
 - **Local orchestration**: Docker Compose
 
@@ -16,33 +17,62 @@ GitHub pull request monitoring platform. Connects to your GitHub App installatio
 
 ```text
 autoPMR/
-├── api/                          # Symfony 8 backend
+├── api/
 │   ├── src/
-│   │   ├── Controller/           # HTTP layer only — thin, delegates to services
+│   │   ├── Controller/
+│   │   │   ├── Api/
+│   │   │   │   ├── Dashboard/            # Dashboard KPI endpoint
+│   │   │   │   ├── Github/               # GitHub OAuth & webhook controllers
+│   │   │   │   ├── WorkspaceController.php        # Workspace CRUD + repo membership
+│   │   │   │   ├── TeamDashboardController.php    # Team PR dashboard endpoints
+│   │   │   │   ├── SubscriptionController.php     # Branch monitoring subscriptions
+│   │   │   │   └── WebhookController.php          # n8n internal webhook receiver
+│   │   │   └── Admin/                    # Admin backoffice API
+│   │   ├── Entity/
+│   │   │   ├── User.php
+│   │   │   ├── GithubInstallation.php
+│   │   │   ├── UserGithubInstallation.php
+│   │   │   ├── RepoSubscription.php
+│   │   │   ├── PullRequestSnapshot.php
+│   │   │   ├── Workspace.php             # Personal workspace
+│   │   │   ├── WorkspaceRepository_.php  # Workspace ↔ repo membership
+│   │   │   ├── PlatformSetting.php
+│   │   │   ├── AdminLog.php
+│   │   │   └── ProcessedWebhookDelivery.php
+│   │   ├── Repository/
+│   │   │   ├── WorkspaceRepository.php              # Workspace queries
+│   │   │   ├── WorkspaceRepositoryEntryRepository.php
+│   │   │   ├── PullRequestSnapshotRepository.php    # Supports workspace repo filter
+│   │   │   └── …
 │   │   ├── Service/
 │   │   │   ├── Github/
-│   │   │   │   ├── GithubApiClient.php         # All GitHub HTTP calls
-│   │   │   │   ├── GithubAppJwtService.php     # RS256 JWT for GitHub App auth
-│   │   │   │   ├── GithubWebhookService.php    # HMAC verification + idempotency
+│   │   │   │   ├── GithubApiClient.php              # All GitHub HTTP calls
+│   │   │   │   ├── GithubAppJwtService.php
+│   │   │   │   ├── GithubWebhookService.php
 │   │   │   │   └── GithubInstallationRepositoriesService.php
-│   │   │   ├── Account/
-│   │   │   │   └── AccountService.php          # User deletion + installation removal
-│   │   │   └── CacheKeys.php                   # Central cache key registry
-│   │   ├── Entity/               # Doctrine entities
-│   │   ├── Repository/           # Doctrine repositories (DB queries only)
-│   │   ├── Message/              # Async message classes
-│   │   ├── MessageHandler/       # Async message handlers
-│   │   └── Security/             # GitHub OAuth authenticator
-│   ├── templates/
-│   │   └── email/
-│   │       └── pr_notification.html.twig   # PR alert email template
-│   └── config/
-├── frontend/                     # Vue 3 SPA
+│   │   │   └── CacheKeys.php
+│   │   ├── Message/
+│   │   └── MessageHandler/
+│   └── migrations/
+│       └── Version20260425000001.php     # workspace + workspace_repository tables
+├── frontend/
 │   └── src/
-│       ├── views/                # Page components
-│       ├── router/               # Vue Router (auth guards)
-│       └── api/                  # API client functions
-├── docker-compose.yml
+│       ├── api/
+│       │   ├── workspaces.ts             # Workspace API client
+│       │   ├── teamDashboard.ts          # Team dashboard API (workspaceId support)
+│       │   └── …
+│       ├── components/
+│       │   ├── WorkspaceSwitcher.vue     # Scope dropdown (URL-driven)
+│       │   └── …
+│       ├── views/
+│       │   ├── WorkspacesView.vue        # Workspace management page
+│       │   ├── DashboardView.vue         # Workspace-scoped dashboard
+│       │   ├── TeamDashboardView.vue     # Workspace-scoped team PRs
+│       │   └── …
+│       └── router/
+├── n8n/
+│   └── workflows/
+│       └── github-pr-review.json
 └── prometheus/
 ```
 
@@ -62,16 +92,39 @@ autoPMR/
 3. Backend records the `GithubInstallation` and links it to the user
 4. User's repo and dashboard caches are busted immediately
 
-### Pull Request Webhook Flow
+### Repository Discovery
 
-1. GitHub POSTs to `/webhooks/github` with HMAC signature
-2. `GithubWebhookService` verifies the signature and checks idempotency
-3. Controller dispatches `ReviewPullRequestMessage` to the async bus
-4. Worker (`ReviewPullRequestMessageHandler`) processes the message:
-   - Finds all users linked to the installation
-   - Filters by per-user notification preferences (event type + repo whitelist)
-   - Sends HTML email (rendered from Twig template) + text fallback
-   - Busts affected caches
+The app fetches repositories from two sources and merges them by repo ID:
+
+1. **GitHub App installation** — `GET /installation/repositories` returns repos explicitly granted to the app during installation (owned repos, selected org repos).
+2. **User OAuth token** — `GET /user/repos?affiliation=owner,collaborator,organization_member` returns every repo the authenticated user can access, including repos they are a **collaborator** on and org repos they belong to.
+
+Installation-sourced entries take priority (they carry a confirmed `installation_id`). Collaborator repos not in the installation list are assigned the user's first available installation ID as a fallback.
+
+> Note: webhook events for collaborator repos on orgs that haven't installed the GitHub App won't arrive until the app is installed on that org.
+
+### Pull Request Webhook Flow (via n8n)
+
+1. GitHub POSTs to n8n webhook endpoint (`/webhook/github-pr`)
+2. n8n forwards the raw payload to Symfony (`/webhooks/github`) with an internal token
+3. `GithubWebhookService` verifies the token and checks idempotency
+4. Controller dispatches `ReviewPullRequestMessage` to the async bus
+5. Worker processes the message: finds linked users, applies notification preferences, sends email, busts caches
+6. In parallel, n8n calls `/api/webhooks/github` for PR snapshot processing
+
+### Team Dashboard
+
+Real-time PR monitoring across all monitored repositories. Supports three layouts (table, kanban, focus), ownership views, filters, and auto-polling stats every 60 seconds. Can be scoped to a workspace via `?workspaceId=`.
+
+### Personal Workspaces
+
+Users can create named groups of repositories to use as a focused scope for the dashboard and team PR views. Workspace selection lives in the URL query (`?workspaceId=N`) so it survives page refreshes. Workspace membership is independent of monitoring subscriptions — adding a repo to a workspace does not activate monitoring.
+
+### Admin Backoffice
+
+1. Admin logs in at `/admin/login` with email/password credentials
+2. Backend issues a JWT token (HS256, 8h TTL)
+3. All `/api/admin/*` endpoints require the JWT via `Authorization: Bearer` header
 
 ## API Endpoints
 
@@ -79,28 +132,95 @@ autoPMR/
 | ------ | ---- | ----------- |
 | `GET` | `/api/ping` | Health check |
 | `GET` | `/api/me` | Current user + GitHub installations |
-| `GET` | `/api/dashboard` | Dashboard KPIs and recent PRs |
-| `GET` | `/api/github/repositories` | List user's accessible repositories |
-| `GET` | `/api/github/repositories/{id}` | Repository details (branches, PRs, insights) |
+| `GET` | `/api/dashboard` | Dashboard KPIs and recent PRs (optional `?workspaceId=`) |
+| `GET` | `/api/github/repositories` | List user's accessible repositories (owned + collaborator) |
+| `GET` | `/api/github/repositories/{id}` | Repository details |
 | `GET` | `/api/github/pull-requests/{id}` | Pull request details |
 | `GET` | `/api/github/pull-requests/{id}/changes` | PR file diffs |
 | `POST` | `/api/github/repositories/cache/clear` | Bust user's repo cache |
+| `GET` | `/api/subscriptions` | List active branch subscriptions |
+| `POST` | `/api/subscriptions` | Activate a branch subscription |
+| `DELETE` | `/api/subscriptions` | Deactivate a branch subscription |
+| `GET` | `/api/team-dashboard` | Open PRs list (filters + pagination, optional `?workspaceId=`) |
+| `GET` | `/api/team-dashboard/stats` | PR stats (optional `?workspaceId=`) |
+| `GET` | `/api/team-dashboard/activity` | Recent PR activity feed (optional `?workspaceId=`) |
+| `GET` | `/api/team-dashboard/pr/{repo}/{number}` | PR sidebar preview |
+| `POST` | `/api/team-dashboard/refresh` | Trigger snapshot refresh |
+| `GET` | `/api/workspaces` | List user's workspaces |
+| `POST` | `/api/workspaces` | Create a workspace |
+| `GET` | `/api/workspaces/{id}` | Get a workspace |
+| `PATCH` | `/api/workspaces/{id}` | Update workspace name/description |
+| `DELETE` | `/api/workspaces/{id}` | Delete a workspace |
+| `PUT` | `/api/workspaces/{id}/repositories` | Replace workspace repository membership |
 | `DELETE` | `/api/account` | Delete account and all data |
 | `DELETE` | `/api/account/installations/{id}` | Remove a GitHub installation |
 | `GET` | `/api/account/notification-preferences` | Get notification preferences |
 | `PATCH` | `/api/account/notification-preferences` | Update notification preferences |
 | `PATCH` | `/api/account/notifications` | Toggle email notifications on/off |
-| `POST` | `/api/logout` | Logout (invalidates session) |
+| `POST` | `/api/logout` | Logout |
 | `GET` | `/connect/github` | Start GitHub OAuth flow |
 | `GET` | `/connect/github/check` | GitHub OAuth callback |
 | `GET` | `/connect/github/app/install` | Redirect to GitHub App install page |
 | `GET` | `/connect/github/app/setup` | Post-install setup callback |
 | `POST` | `/webhooks/github` | GitHub webhook receiver |
+| `POST` | `/api/webhooks/github` | n8n internal webhook (GitHub) |
 | `GET` | `/unsubscribe/{token}` | One-click email unsubscribe |
+| | | |
+| **Admin** | | |
+| `POST` | `/api/admin/auth/login` | Admin login (returns JWT) |
+| `GET` | `/api/admin/stats` | Dashboard KPIs |
+| `GET` | `/api/admin/users` | List users |
+| `GET` | `/api/admin/users/{id}` | User detail |
+| `GET` | `/api/admin/repos` | List repositories |
+| `GET` | `/api/admin/webhook-events` | List webhook events |
+| `GET` | `/api/admin/notifications` | List sent notifications |
+| `GET` | `/api/admin/logs` | Admin audit logs (paginated, CSV export) |
+| `GET` | `/api/admin/settings` | Platform settings |
+| `PATCH` | `/api/admin/settings` | Update platform settings |
+
+## Personal Workspaces
+
+Workspaces are personal repository groups that scope the dashboard and team PR views without affecting monitoring subscriptions.
+
+### Data model
+
+| Table | Purpose |
+| ----- | ------- |
+| `workspace` | One row per workspace; unique name per user |
+| `workspace_repository` | Join table; unique repo per workspace |
+
+### Workspace API
+
+```
+GET    /api/workspaces                      → list all workspaces
+POST   /api/workspaces                      → create  { name, description? }
+GET    /api/workspaces/{id}                 → get one
+PATCH  /api/workspaces/{id}                 → update  { name?, description? }
+DELETE /api/workspaces/{id}                 → delete (cascades membership)
+PUT    /api/workspaces/{id}/repositories    → replace membership
+                                              body: { repositories: [{ repoFullName, repoId, installationId }] }
+```
+
+All repos submitted to the membership endpoint are validated against the user's accessible GitHub repos. Submitting an empty array clears the workspace.
+
+### Workspace scoping
+
+Pass `?workspaceId=N` to any of these endpoints to restrict results to that workspace's repos:
+
+- `GET /api/dashboard`
+- `GET /api/team-dashboard`
+- `GET /api/team-dashboard/stats`
+- `GET /api/team-dashboard/activity`
+
+An empty workspace returns valid empty shapes — no errors.
+
+### Frontend
+
+- New route `/workspaces` with a **Workspaces** sidebar entry
+- `WorkspacesView` — create/edit/delete workspaces, multi-select repo editor, monitored/not-monitored badge per repo, "Open in Dashboard" / "Open in Team PRs" CTAs
+- `WorkspaceSwitcher` component on `DashboardView` and `TeamDashboardView` — dropdown that reads/writes `workspaceId` in the URL; selecting "All repositories" removes the param
 
 ## Notification Preferences
-
-Each user can configure which PR events trigger an email and which repositories to monitor:
 
 ```json
 {
@@ -122,8 +242,6 @@ Each user can configure which PR events trigger an email and which repositories 
 
 ## Caching
 
-GitHub API responses are cached server-side to reduce latency and stay within GitHub's rate limits (5 000 req/hour per installation). All cache keys are defined in `CacheKeys`.
-
 | Data | TTL |
 | ---- | --- |
 | Repository list | 120 s (10 s if empty) |
@@ -132,10 +250,11 @@ GitHub API responses are cached server-side to reduce latency and stay within Gi
 | Branches | 120 s |
 | Insights | 120 s |
 | PR details / changes | 120 s |
-| Dashboard payload | 90 s |
+| Dashboard payload (unscoped) | 90 s |
+| Team dashboard stats (unscoped) | 60 s |
 | Latest PR webhook event | 1 hour |
 
-Cache is busted automatically on new webhook events, installation changes, and manual cache-clear requests.
+Workspace-scoped dashboard requests bypass the cache and are computed fresh. Cache is busted automatically on webhook events, installation changes, and manual cache-clear requests.
 
 ## Local Setup
 
@@ -144,7 +263,7 @@ Cache is busted automatically on new webhook events, installation changes, and m
 - Docker + Docker Compose
 - A GitHub App with a webhook secret and private key
 
-### Environment variables (`.env.local` in `api/`)
+### Environment variables (`api/.env.local`)
 
 ```env
 GITHUB_APP_ID=your_app_id
@@ -161,14 +280,24 @@ PR_ALERT_FRONT_URL=http://localhost:5173
 
 DATABASE_URL=postgresql://app:!ChangeMe!@127.0.0.1:5432/app
 MESSENGER_TRANSPORT_DSN=doctrine://default?auto_setup=0
+
+N8N_INTERNAL_TOKEN=changeme-internal-token
+
+ADMIN_EMAIL=admin@admin.com
+ADMIN_PASSWORD=adminadmin
+ADMIN_SECRET=change-me-in-production-use-a-long-random-string
 ```
 
 ### Start everything
 
 ```bash
-docker compose up --build
-# or in the background:
 docker compose up -d --build
+```
+
+### Run migrations
+
+```bash
+docker compose exec api php bin/console doctrine:migrations:migrate --no-interaction
 ```
 
 ### Stop
@@ -183,8 +312,16 @@ docker compose down
 make up
 make down
 make build
-make csfix   # Run PHP CS Fixer
+make csfix   # PHP CS Fixer
 ```
+
+### n8n Setup
+
+1. Start containers: `docker compose up -d`
+2. Open n8n at <http://localhost:5678> and complete the setup wizard
+3. Import the workflow from `n8n/workflows/github-pr-review.json`
+4. Activate the workflow
+5. Set your GitHub App's webhook URL to your n8n endpoint (e.g. `https://your-ngrok-url/webhook/github-pr`)
 
 ## Local URLs
 
@@ -192,6 +329,8 @@ make csfix   # Run PHP CS Fixer
 | ------- | --- |
 | Frontend | <http://localhost:5173> |
 | API | <http://localhost:8000> |
+| Admin Backoffice | <http://localhost:5173/admin> |
+| n8n | <http://localhost:5678> |
 | pgAdmin | <http://localhost:5050> |
 | Mailpit UI | <http://localhost:8025> |
 | Prometheus | <http://localhost:9090> |
@@ -204,8 +343,24 @@ make csfix   # Run PHP CS Fixer
 | PostgreSQL | DB: `app` / User: `app` / Password: `!ChangeMe!` |
 | pgAdmin | Email: `admin@example.com` / Password: `admin` |
 | Grafana | User: `admin` / Password: `admin` |
+| Admin Backoffice | Email: `admin@admin.com` / Password: `adminadmin` |
+| n8n | Created during setup wizard |
 
 Change all of these for any shared, staging, or production environment.
+
+## Database Migrations
+
+| Version | Description |
+| ------- | ----------- |
+| `20260219232641` | Initial schema |
+| `20260228210356` | GitHub installation tables |
+| `20260315000001` | Notification preferences |
+| `20260315000002` | Unsubscribe token |
+| `20260402000001` | Admin logs |
+| `20260403000001` | Platform settings |
+| `20260409000001` | Sessions, GitHub access token, repo subscriptions |
+| `20260410000001` | Pull request snapshots, onboarding state |
+| `20260425000001` | Personal workspaces (`workspace`, `workspace_repository`) |
 
 ## Current Status
 
@@ -213,23 +368,26 @@ Change all of these for any shared, staging, or production environment.
 
 - GitHub OAuth login/logout
 - GitHub App install/setup flow
+- Repository discovery: owned repos + collaborator repos + org member repos (merged from installation API and user OAuth token)
 - PR webhook ingestion with HMAC verification and idempotency
 - Async email notifications with per-user event + repository filters
-- Rich HTML email template (Twig) with unsubscribe link
+- Rich HTML email template with unsubscribe link
 - Repository list, details, branches, pull requests, insights
 - Pull request details and file diffs
-- Dashboard with KPIs and recent PRs
-- Server-side caching with automatic invalidation
+- Dashboard with KPIs, recent PRs, and top repositories
+- Team dashboard with table / kanban / focus layouts, ownership views, filters, pagination, and auto-polling
+- Branch monitoring subscriptions (activate/deactivate per branch)
+- Pull request snapshots (persisted, refreshable)
+- Personal workspaces — create named repo groups, scope dashboard and team PR views via URL query param
+- Server-side caching with automatic invalidation (workspace-scoped requests bypass cache)
 - Settings page: notification preferences + email toggle
 - Account deletion and installation removal
+- Admin backoffice (JWT auth, user/repo/log management, dashboard stats, platform settings, CSV export)
 - Landing page + Vue Router auth guards
 
 ### Not Implemented Yet
 
+- AI review pipeline (handler stub in place)
 - Multi-provider support (GitLab stub only)
-- Persistent domain storage for PR snapshots and review history
-- Background AI analysis pipeline and results UI
-- Tenant/workspace model and role-based permissions
 - Billing / subscription features
 - Full automated test coverage and CI quality gates
-- Production hardening (audit logs, structured observability)

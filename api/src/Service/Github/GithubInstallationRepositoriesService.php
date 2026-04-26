@@ -425,6 +425,7 @@ final class GithubInstallationRepositoriesService
 
         $byRepoId = [];
 
+        // 1. Fetch repos accessible via the GitHub App installation
         foreach ($links as $link) {
             $installation = $link->getInstallation();
             if ($installation === null || $installation->getInstallationId() === null) {
@@ -455,6 +456,58 @@ final class GithubInstallationRepositoriesService
                     ];
                 }
                 $hasMore = ($page * 100) < $result['total_count'];
+                $page++;
+            } while ($hasMore);
+        }
+
+        // 2. Also fetch repos the user can access via their personal OAuth token
+        //    (covers repos they're a collaborator on, org repos, etc.)
+        $userToken = $user->getGithubAccessToken();
+        if ($userToken !== null && $userToken !== '') {
+            // Build a map of installation IDs by repo full_name for cross-referencing
+            $installationByFullName = [];
+            foreach ($byRepoId as $repo) {
+                if (isset($repo['full_name'], $repo['installation_id'])) {
+                    $installationByFullName[$repo['full_name']] = $repo['installation_id'];
+                }
+            }
+
+            // Determine the installation ID to use for user-token repos (first available)
+            $defaultInstallationId = null;
+            foreach ($links as $link) {
+                $inst = $link->getInstallation();
+                if ($inst !== null && $inst->getInstallationId() !== null) {
+                    $defaultInstallationId = $inst->getInstallationId();
+                    break;
+                }
+            }
+
+            $page = 1;
+            do {
+                $repos = $this->apiClient->fetchUserAccessibleRepositories($userToken, $page);
+                foreach ($repos as $repo) {
+                    if (!is_array($repo) || !isset($repo['id'])) {
+                        continue;
+                    }
+                    $repoKey = (string) $repo['id'];
+                    // Prefer the installation-sourced entry if already present (has a valid installation_id)
+                    if (isset($byRepoId[$repoKey])) {
+                        continue;
+                    }
+                    $fullName = $repo['full_name'] ?? null;
+                    $installationId = is_string($fullName) ? ($installationByFullName[$fullName] ?? $defaultInstallationId) : $defaultInstallationId;
+
+                    $byRepoId[$repoKey] = [
+                        'id' => $repo['id'],
+                        'name' => $repo['name'] ?? null,
+                        'full_name' => $fullName,
+                        'private' => $repo['private'] ?? null,
+                        'html_url' => $repo['html_url'] ?? null,
+                        'default_branch' => $repo['default_branch'] ?? null,
+                        'installation_id' => $installationId,
+                    ];
+                }
+                $hasMore = \count($repos) === 100;
                 $page++;
             } while ($hasMore);
         }
